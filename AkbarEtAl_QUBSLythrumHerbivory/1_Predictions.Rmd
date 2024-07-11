@@ -1,0 +1,98 @@
+---
+title: "Plot predictions"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup 
+
+```{r load libraries, include = FALSE}
+library(viridis) 
+library(gridExtra)
+library(cowplot)
+library(tidyverse)
+```
+
+
+```{r}
+setwd("./")
+ifelse((!dir.exists(file.path("./", "Figures"))), (dir.create(file.path("./", "Figures"))), FALSE)
+
+Dat <- read.csv("./Data/Predictions.csv") 
+
+Dat$Trait <- case_match(Dat$Trait, "FVeg" ~ "Size at Flowering", 
+         "FT" ~ "Flowering Time",
+         "Fit" ~ "Fecundity",
+         "Dam" ~ "Herbivore Damage",
+         .default = Dat$Trait)
+
+source("http://bit.ly/theme_pub")
+```
+
+```{r}
+fig1rxn <- c("J", "I", "F", "A")
+
+# Create a list to store the plots
+P <- list()
+
+  for (code in fig1rxn) {
+  
+  # Subset the data for the code
+  subset_data <- Dat[Dat$Code == code, ]
+  
+  # Create the plot for the current combination
+  p <- ggplot(subset_data, aes(x = Treatment, y = Value, colour = Genotype)) +
+  geom_point(size = 3) +
+  geom_line(aes(group = Genotype)) +
+  labs(x = "Treatment", y = paste(subset_data$Trait)) + 
+  scale_color_manual(values = c("North" = "#150e38", "Mid" = "#ab337c", "South" = "#feb47b", "Resistant" = "#07061c", "Susceptible" = "#6a1c81", "Resistant1" = "#07061c")) +
+  theme_pub() +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+        axis.title.y = element_text(size=14,angle=90, margin=margin(r=5)),
+        axis.text.y = element_blank()) 
+ 
+# Store the plot in the plot_list
+  P[[paste(code)]] <- p
+  
+  }
+```
+
+```{r}
+fig1fit <- c("D", "E", "T", "H")
+
+  for (code in fig1fit) {
+  
+  # Subset the data for the code
+  subset_data <- Dat[Dat$Code == code, ]
+  
+  # Create the plot for the current combination
+  p <- ggplot(subset_data,aes(x = Value, y = Fit, colour = Genotype)) +
+  geom_jitter(aes(shape = Treatment), size = 3) +
+  labs(x = paste(subset_data$Trait), y = "Fecundity (g)") + 
+  scale_shape_manual(values = c(16,2)) +
+  scale_color_manual(values = c("North" = "#150e38", "Mid" = "#ab337c", "South" = "#feb47b", "Resistant" = "#07061c", "Susceptible" = "#6a1c81", "Resistant1" = "#07061c")) +
+  theme_pub() +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+        axis.title.y = element_text(size=14,angle=90, margin=margin(r=5)),
+        axis.text.y = element_blank()) 
+  
+   if (code == "T"| code == "D") {
+    p <- p + geom_smooth(aes(x = Value, y = Fit, linetype = Treatment), method = "lm", formula = y ~ x + I(x^2), se = FALSE, colour = "black")
+  } else {
+    p <- p + geom_smooth(aes(x = Value, y = Fit), method = "lm", formula = y ~ x, se = FALSE, colour = "black")
+  }
+ 
+# Store the plot in the plot_list
+  P[[paste(code)]] <- p
+  
+  }
+```
+
+
+```{r}
+pdf("./Figures/Fig1Predictions.pdf",width=6.5,height=6.5)
+plot_grid(P$F, P$I, P$T, P$H, P$J, P$A, P$D, P$E, nrow = 2, labels = "AUTO", hjust = c(-3,-3,-3,-3,-3,-3.5,-2.7,-3), vjust = 2)
+dev.off()
+```
+

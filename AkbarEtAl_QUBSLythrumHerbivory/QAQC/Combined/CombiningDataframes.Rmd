@@ -1,0 +1,515 @@
+---
+title: "Combining Dataframes"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+---
+title: "Combining Dataframes - No Development"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Load libraries
+
+```{r, include=FALSE}
+library(tidyverse)
+library(lubridate)
+```
+
+# Load Data
+
+## Population information 
+
+```{r,include=FALSE}
+setwd("./")
+popinfo <- read.csv("./Data/populationinfo.csv")
+popinfo <- popinfo %>% 
+  mutate(Ind = as.factor(paste(BLOCK, ID, sep = "-")),
+         Treatment = case_when(BLOCK == "E3" | BLOCK == "E6" | BLOCK == "E10" | BLOCK == "E12" | BLOCK == "E8" | BLOCK == "E1" ~ "Sprayed", TRUE ~ "Unsprayed")) %>% 
+  select(Ind, POP, FAM, LAT, LON, POPNAME, BLOCK,Treatment)
+Climate <- read.csv("./Data/ClimateData.csv")
+```
+
+
+```{r,include=FALSE}
+mystery_ind <- c("E10-2","E11-51","E3-102","E4-1","E4-2","E4-85","E4-180","E5-53","E5-78","E5-84","E5-108","E5-133","E6-134","E6-139","E9-21","E2-101","E2-102","E2-104","E2-105","E2-105","E2-106","E2-107","E2-110") #temporarily remove these individuals from the df because they are not in the POP sheet.Need to check with Rob/do full audit as of 24-05-12.
+```
+
+
+## Biomass
+
+```{r, include=FALSE}
+fit18 <- read.csv("./Data/Clean/2018_Fitness_Clean.csv")
+fit18 <- fit18 %>% 
+  mutate(Year="2018") %>% 
+  filter(!Ind %in% mystery_ind) %>% 
+  select(!rawWeight)
+
+fit19 <- read.csv("./Data/Clean/2019_Fitness_Clean.csv")
+fit19 <- fit19 %>% 
+  rename(Ind=ind) %>% 
+  mutate(Year="2019") %>% 
+  filter(!Ind %in% mystery_ind) %>% 
+  select(!rawWeight)
+
+fit20 <- read.csv("./Data/Clean/2020FitnessClean.csv")
+fit20$Weight <- ifelse(fit20$Weight < 0, 0, fit20$Weight)
+fit20 <- fit20 %>% 
+  mutate(Ind = as.factor(paste(Block, Pos, sep = "-")),
+         Year = "2020")  %>% 
+  filter(!Ind %in% mystery_ind) %>% 
+  select(!rawWeight)
+
+fit21 <- read.csv("./Data/Clean/2021FitnessClean.csv")
+fit21 <- fit21 %>% 
+  mutate(Year="2021")  %>% 
+  filter(!Ind %in% mystery_ind) %>% 
+  select(!rawWeight)
+#fit21 <- fit21[complete.cases(fit21$Treatment), ] #removing the weird random NA's at the end of this df
+
+fit22 <- read.csv("./Data/Clean/2022FitnessClean.csv")
+fit22 <- fit22 %>% 
+  mutate(Ind = as.factor(paste(Block, Pos, sep = "-")),
+         Year = "2022") %>% 
+  filter(!Ind %in% mystery_ind) %>% 
+  select(!rawWeight)
+
+fit23 <- read.csv("./Data/Clean/2023FitnessClean.csv")
+fit23 <- fit23 %>% 
+  mutate(Ind = as.factor(paste(Block, Pos, sep = "-")),
+         Year = "2023") %>% 
+  filter(!Ind %in% mystery_ind)
+```
+
+```{r, include=FALSE}
+Fit <- rbind(fit18, fit19, fit20, fit21, fit22, fit23) #combine all years into one dataframe
+```
+
+```{r}
+Fit <- Fit %>% select(!c(Block, Pos))
+```
+
+## Phenological metrics
+
+### Development and julian day of flowering
+
+```{r, include=FALSE}
+Dev18 <- read.csv("./Data/Clean/semiclean_heightdat.csv")
+Dev18 <- Dev18 %>% 
+  select(ind, block, date, surveyor, stem_length, bud_length, flower_length, fruit_length) %>% 
+  rename(Ind=ind,
+         Block=block,
+         Date=date,
+         Measurer=surveyor,
+         Veg=stem_length,
+         Bud=bud_length,
+         Flr=flower_length,
+         Fert=fruit_length) %>% 
+    filter(!Ind %in% mystery_ind) %>% 
+  mutate(Year="2018")
+Dev18 <- left_join(Dev18, popinfo, by="Ind")
+Dev18$Julian <- yday(Dev18$Date)
+
+Ft18 <- Dev18 %>% 
+  filter(!is.na(Flr)) %>% 
+  group_by(Ind) %>% 
+  summarise(FT = min(Julian))
+
+Dev18 <- left_join(Dev18, Ft18, by = "Ind")
+```
+
+```{r, include=FALSE}
+Dev19 <- read.csv("./Data/Clean/2019_Heights_Clean.csv")
+Dev19 <- Dev19 %>% 
+  select(ind,date, measurer, veg, bud, flw, frt) %>% 
+  rename(Ind=ind,
+         Date=date,
+         Measurer=measurer,
+         Veg=veg,
+         Bud=bud,
+         Flr=flw,
+         Fert=frt) %>% 
+   filter(!Ind %in% mystery_ind) %>% 
+  mutate(Year="2019")
+Dev19 <- left_join(Dev19, popinfo, by="Ind")
+Dev19$Julian <- yday(Dev19$Date)
+
+Ft19 <- Dev19 %>% 
+  filter(!is.na(Flr)) %>% 
+  group_by(Ind) %>% 
+  summarise(FT = min(Julian)) 
+
+Dev19 <- left_join(Dev19, Ft19, by = "Ind")
+```
+
+```{r, include=FALSE}
+Dev20 <- read.csv("./Data/Clean/2020_SemiClean_Lythrum_Heights.csv")
+Dev20 <- Dev20 %>% 
+  select(Ind, Block, Date, Measurer, Veg, Bud, Flr, Fert)
+Dev20 <- left_join(Dev20, popinfo, by="Ind") %>% 
+    filter(!Ind %in% mystery_ind) %>% 
+  mutate(Year="2020")
+Dev20$Julian <- yday(Dev20$Date)
+
+Ft20 <- Dev20 %>% 
+  filter(!is.na(Flr)) %>% 
+  group_by(Ind) %>% 
+  summarise(FT = min(Julian))
+
+Dev20 <- left_join(Dev20, Ft20, by = "Ind")
+```
+
+```{r, include=FALSE}
+Dev21 <- read.csv("./Data/Clean/2021_SemiClean_Lythrum_Heights.csv")
+Dev21 <- Dev21 %>% 
+  select(Ind, Block, Date, Measurer, Veg, Bud, Flr, Fert)
+Dev21 <- left_join(Dev21, popinfo, by="Ind") %>% 
+    filter(!Ind %in% mystery_ind) %>% 
+  mutate(Year="2021")
+Dev21$Julian <- yday(Dev21$Date)
+
+Ft21 <- Dev21 %>% 
+  filter(!is.na(Flr)) %>% 
+  group_by(Ind) %>% 
+  summarise(FT = min(Julian))
+
+Dev21 <- left_join(Dev21, Ft21, by = "Ind")
+```
+
+```{r, include=FALSE}
+Dev22 <- read.csv("./Data/Clean/2022_SemiClean_Lythrum_Heights.csv")
+Dev22 <- Dev22 %>% 
+  select(Ind, Block, Date, Measurer, Veg, Bud, Flr, Fert)
+Dev22 <- left_join(Dev22, popinfo, by="Ind") %>% 
+    filter(!Ind %in% mystery_ind) %>% 
+  mutate(Year="2022")
+Dev22$Julian <- yday(Dev22$Date)
+
+Ft22 <- Dev22 %>% 
+  filter(!is.na(Flr)) %>% 
+  group_by(Ind) %>% 
+  summarise(FT = min(Julian))
+
+Dev22 <- left_join(Dev22, Ft22, by = "Ind")
+```
+
+```{r, include=FALSE}
+Dev23 <- read.csv("./Data/Clean/2023_SemiClean_Lythrum_Heights.csv")
+Dev23 <- Dev23 %>% 
+  select(Ind, Block, Date, Measurer, Veg, Bud, Flr, Frt) %>% 
+  rename(Fert = Frt) 
+Dev23 <- left_join(Dev23, popinfo, by="Ind") %>% 
+    filter(!Ind %in% mystery_ind) %>% 
+  mutate(Year="2023")
+Dev23$Julian <- yday(Dev23$Date)
+
+Ft23 <- Dev23 %>% 
+  filter(!is.na(Flr)) %>% 
+  group_by(Ind) %>% 
+  summarise(FT = min(Julian))
+
+Dev23 <- left_join(Dev23, Ft23, by = "Ind")
+```
+
+```{r}
+Dev <- bind_rows(Dev18, Dev19, Dev20, Dev21, Dev22, Dev23) 
+Dev <- Dev[complete.cases(Dev$BLOCK), ] #removing the strange NA's in this column that are found at the end of 2018
+```
+
+## Error correcting. See LythrumData/Collating Years/ErrorChecking.Rmd for details 
+```{r}
+Dev[which(Dev$Ind == "E8-125" & Dev$Year == "2019" & Dev$Julian == "141"), "Veg"] <- 11
+
+Dev[which(Dev$Ind == "E3-188" & Dev$Year == "2020" & Dev$Julian == "160"), "Veg"] <- 26
+
+Dev[which(Dev$Ind == "E6-36" & Dev$Year == "2022" & Dev$Julian == "168"), "Veg"] <- 124
+
+Dev[which(Dev$Ind == "E8-7" & Dev$Year == "2020" & Dev$Julian == "160"), "Veg"] <- 19.5
+
+Dev[which(Dev$Ind == "E1-64" & Dev$Year == "2020" & Dev$Julian == "167"), "Veg"] <- 23
+
+Dev[which(Dev$Ind == "E10-86" & Dev$Year == "2023" & Dev$Julian == "179"), "Veg"] <- 87
+
+Dev[which(Dev$Ind == "E6-43" & Dev$Year == "2019" & Dev$Julian == "178"), "Veg"] <- 77
+
+Dev[which(Dev$Ind == "E9-133" & Dev$Year == "2018" & Dev$Julian == "172"), "Veg"] <- 48
+
+Dev[which(Dev$Ind == "E8-125" & Dev$Year == "2019" & Dev$Julian == "141"), "Veg"] <- 11
+
+Dev[which(Dev$Ind == "E10-116" & Dev$Year == "2022" & Dev$Julian == "235"), "Veg"] <- 110
+
+Dev[which(Dev$Ind == "E6-50" & Dev$Year == "2022" & Dev$Julian == "175"), "Veg"] <- 110
+
+Dev[which(Dev$Ind == "E6-11" & Dev$Year == "2022" & Dev$Julian == "235"), "Veg"] <- 150
+
+Dev[which(Dev$Ind == "E6-24" & Dev$Year == "2019" & Dev$Julian == "225"), "Veg"] <- NA
+
+Dev[which(Dev$Ind == "E6-24" & Dev$Year == "2023" & Dev$Julian == "187"), "Veg"] <- 52
+
+Dev[which(Dev$Ind == "E8-50" & Dev$Year == "2022" & Dev$Julian == "175"), "Veg"] <- 110
+```
+
+### Julian day of budding and fruiting 
+
+```{r}
+BudTime <- Dev %>% 
+  group_by(Ind,Year) %>% 
+ filter(!is.na(Bud)) %>% 
+  summarise(BT = min(Julian))
+Dev <- left_join(Dev, BudTime)
+```
+
+```{r}
+FruitTime <- Dev %>% 
+  group_by(Ind,Year) %>% 
+ filter(!is.na(Fert)) %>% 
+  summarise(FertT = min(Julian))
+Dev <- left_join(Dev, FruitTime)
+```
+
+### Final vegetative size
+
+```{r, include=FALSE}
+FVeg18 <- Dev18 %>% 
+  arrange(Ind, Date) %>% 
+  filter(!is.na(Veg)) %>% 
+  group_by(Ind) %>% 
+  slice_tail(n=1) %>% 
+  select(Ind, Veg, Year)
+
+FVeg19 <- Dev19 %>% 
+  arrange(Ind, Date) %>% 
+  filter(!is.na(Veg)) %>% 
+  group_by(Ind) %>% 
+  slice_tail(n=1) %>% 
+ select(Ind, Veg, Year)
+
+FVeg20 <- Dev20 %>% 
+  arrange(Ind, Date) %>% 
+  filter(!is.na(Veg)) %>% 
+  group_by(Ind) %>% 
+  slice_tail(n=1) %>% 
+  select(Ind, Veg, Year)
+
+FVeg21 <- Dev21 %>% 
+  arrange(Ind, Date) %>% 
+  filter(!is.na(Veg)) %>% 
+  group_by(Ind) %>% 
+  slice_tail(n=1) %>% 
+  select(Ind, Veg, Year)
+
+FVeg22 <- Dev22 %>% 
+  arrange(Ind, Date) %>% 
+  filter(!is.na(Veg)) %>% 
+  group_by(Ind) %>% 
+  slice_tail(n=1) %>% 
+  select(Ind, Veg, Year)
+
+FVeg23 <- Dev23 %>% 
+  arrange(Ind, Date) %>% 
+  filter(!is.na(Veg)) %>% 
+  group_by(Ind) %>% 
+  slice_tail(n=1) %>% 
+  select(Ind, Veg, Year)
+```
+ 
+```{r}
+FVeg <- rbind(FVeg18, FVeg19, FVeg20, FVeg21, FVeg22, FVeg23) 
+FVeg <- FVeg %>% rename(FVeg = Veg)
+```
+
+
+### Manually adding FT for certain individuals. See LythrumData/Collating Years/ErrorChecking.Rmd for details 
+
+```{r}
+Dev[which(Dev$Ind == "E1-175" & Dev$Year == "2020"), "FT"] <- 210
+
+Dev[which(Dev$Ind == "E8-154" & Dev$Year == "2020"), "FT"] <- 202
+
+Dev[which(Dev$Ind == "E12-109" & Dev$Year == "2020"), "FT"] <- 203
+
+Dev[which(Dev$Ind == "E3-51" & Dev$Year == "2021"), "FT"] <- 228
+
+Dev[which(Dev$Ind == "E3-167" & Dev$Year == "2021"), "FT"] <- 221
+
+Dev[which(Dev$Ind == "E6-149" & Dev$Year == "2021"), "FT"] <- 207
+
+Dev[which(Dev$Ind == "E6-196" & Dev$Year == "2021"), "FT"] <- 239
+
+Dev[which(Dev$Ind == "E9-180" & Dev$Year == "2021"), "FT"] <- 238
+
+Dev[which(Dev$Ind == "E4-25" & Dev$Year == "2022"), "FT"] <- 221
+
+Dev[which(Dev$Ind == "E4-79" & Dev$Year == "2022"), "FT"] <- 221
+
+Dev[which(Dev$Ind == "E9-63" & Dev$Year == "2022"), "FT"] <- 221
+
+Dev[which(Dev$Ind == "E9-89" & Dev$Year == "2022"), "FT"] <- 227
+
+Dev[which(Dev$Ind == "E9-108" & Dev$Year == "2022"), "FT"]<- 221
+
+Dev[which(Dev$Ind == "E9-161" & Dev$Year == "2022"), "FT"] <- 207
+
+Dev[which(Dev$Ind == "E9-162" & Dev$Year == "2022"), "FT"] <- 207
+
+Dev[which(Dev$Ind == "E9-202" & Dev$Year == "2022"), "FT"] <- 207
+```
+
+### Growing degree day of flowering/budding/fruiting
+
+```{r}
+Climate$Year <- as.character(Climate$Year)
+Dev <- left_join(Dev,Climate, by = c("Date","Year")) ## add GDD info
+
+Dev <- Dev %>% group_by(Year,Ind) %>% 
+  mutate(FT_GDD10 = GDD10[Julian == FT],
+         FT_GDD5 = GDD5[Julian == FT],
+         BT_GDD10 = GDD10[Julian == BT],
+         BT_GDD5 = GDD5[Julian == BT],
+         FertT_GDD10 = GDD10[Julian == FertT],
+         FertT_GDD5 = GDD5[Julian == FertT]) 
+```
+
+### Vegetative size at flowering 
+
+```{r}
+FlwrVeg <- Dev %>% 
+  filter(FT == Julian) %>%
+  group_by(Ind, Year) %>% 
+  select(Ind, Year, Veg) %>% 
+  rename(FlwrVeg = Veg)
+```
+
+```{r}
+FlwrVeg_GDD10 <- Dev %>% 
+  filter(FT_GDD10 == GDD10) %>%
+  group_by(Ind, Year) %>% 
+  select(Ind, Year, Veg) %>% 
+  rename(FlwrVeg_GDD10 = Veg)
+```
+
+```{r}
+FlwrVeg_GDD5 <- Dev %>% 
+  filter(FT_GDD5 == GDD5) %>%
+  group_by(Ind, Year) %>% 
+  select(Ind, Year, Veg) %>% 
+  rename(FlwrVeg_GDD5 = Veg)
+```
+
+
+## Damage Reports
+
+In years where multiple surveys were done, we filter for the closest time points to previous years (July)
+
+```{r, include=FALSE}
+dam18 <- read.csv("./Data/Clean/2018DamClean.csv")
+dam18 <- dam18 %>% 
+  mutate(Year="2018",
+         OH = NA) %>% 
+  rename(PropDam = Prop_Dam) %>% 
+  mutate(StemTotal = Num_primary_stems) %>% 
+  select(Date, Year, Ind, PropDam, OH, StemTotal) %>% 
+  filter(!Ind %in% mystery_ind) 
+
+dam19 <- read.csv("./Data/Clean/2019_Dam_Clean.csv")
+dam19 <- dam19 %>% 
+  mutate(Year="2019") %>% 
+  rename(PropDam = prop_dam,
+         OH = dmg.score,
+         Ind = ind,
+         Date = date) %>% 
+  mutate(StemTotal = total.stems) %>% 
+  select(Date, Year, Ind, PropDam, OH, StemTotal) %>% 
+  filter(!Ind %in% mystery_ind) %>% 
+  filter(Date == "19-Jul-19" | Date == "18-Jul-19" | Date == "20-Jul-19")
+
+
+dam20 <- read.csv("./Data/Clean/2020_Dam_Clean.csv")
+dam20 <- dam20 %>% 
+  mutate(Year="2020") %>% 
+  mutate(StemTotal = U + D) %>% 
+  select(Date, Year, Ind, PropDam, OH, StemTotal) %>% 
+  filter(!Ind %in% mystery_ind) %>% 
+  filter(Date == "2020-07-01")
+
+dam21 <- read.csv("./Data/Clean/2021_Dam_Clean.csv")
+dam21 <- dam21 %>% 
+  mutate(Year="2021") %>% 
+  mutate(StemTotal = U + D) %>% 
+  select(Date, Year, Ind, PropDam, OH, StemTotal) %>% 
+  filter(!Ind %in% mystery_ind) 
+
+dam22 <- read.csv("./Data/2022Damage_ForAnalysis.csv")
+dam22 <- dam22 %>% 
+  mutate(Year="2022") %>% 
+  mutate(Ind = paste(Block, Pos, sep="-")) %>% 
+  mutate(PropDam = D / (U+D)) %>% 
+  mutate(StemTotal = U + D) %>% 
+  select(Date, Year, Ind, PropDam, OH, StemTotal) %>% 
+  filter(!Ind %in% mystery_ind) 
+
+dam23 <- read.csv("./Data/Clean/2023_Dam_Clean.csv")
+dam23 <- dam23 %>% 
+  mutate(Year="2023") %>% 
+  mutate(StemTotal = U + D) %>% 
+  select(Date, Year, Ind, PropDam, OH, StemTotal) %>% 
+  filter(!Ind %in% mystery_ind) 
+```
+
+```{r, include=FALSE}
+Dam <- rbind(dam18, dam19, dam20, dam21, dam22, dam23) #combine all years into one dataframe
+Dam <- Dam %>% select(!Date)
+```
+
+# Combine dataframes
+
+**Note to future self: please do not make this one long pipe- it is easier to error check/correct along the way if you do not.  
+
+```{r}
+FT <- Dev %>% select(Ind, POP, FAM, LAT, LON, POPNAME, BLOCK, Treatment, Year, FT, BT, FertT, FT_GDD10, FT_GDD5, BT_GDD10, BT_GDD5, FertT_GDD10, FertT_GDD5) %>% 
+  group_by(Year) %>% 
+  distinct(Ind, .keep_all = TRUE)
+
+FTVeg <- left_join(FVeg, FT) %>%
+  left_join(FlwrVeg) %>% 
+  left_join(FlwrVeg_GDD10) %>%
+  left_join(FlwrVeg_GDD5) %>% 
+  filter(!Ind %in% mystery_ind)  %>% 
+  left_join(Fit)
+
+QUBS <- left_join(FTVeg,Dam)
+```
+
+
+```{r}
+QUBS <- QUBS %>% 
+  filter(!(Ind == "E3-107" & Year == "2020")) %>% 
+  filter(!((Ind == "E9-177" | Ind == "E10-151") & Year == "2021")) %>% 
+  filter(!(Ind == "E9-32" & Year == "2021")) %>% 
+  filter(!(Ind == "E4-61" & Year == "2022")) %>% 
+  filter(!(Ind == "E8-201" & Year == "2019")) #missing obs
+#Excluding. See LythrumData/CollatingYears/ErrorChecking.Rmd (section FrtnoFlwr) for details
+```
+
+```{r}
+#coding a unique family column 
+QUBS <- QUBS %>% 
+  mutate(FAM = as.factor(paste(POP, FAM, sep = "-"))) 
+```
+
+```{r}
+QUBS1 <- QUBS %>%  select(Ind, POP, FAM, LAT, LON, POPNAME, BLOCK, Treatment, Year, FVeg, FT, BT, FertT, FlwrVeg, Weight, PropDam, OH, StemTotal)
+```
+
+
+# Export data 
+
+```{r}
+write.csv(QUBS1, "./Data/Combined/QUBSLythrumCG.csv", row.names=F)
+write.csv(QUBS, "./Data/Combined/QUBSLythrumCG_GDD.csv", row.names=FALSE)
+```
+
+

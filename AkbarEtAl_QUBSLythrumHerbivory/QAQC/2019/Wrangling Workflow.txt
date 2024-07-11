@@ -1,0 +1,51 @@
+Cleaning 2019 Lythrum Field Data
+
+## (1) Prep data for error-checking
+- for each dataset (heights, damage, fitness)
+-- make sure columns are the right data type
+-- do a summary() to check for odd values
+-- take only values not in "Missing_Plants_List.csv" (use anti_join(x,y,key="") from dplyr, takes all values from x that aren't in y)
+
+# Height data:
+- make a column "round" that says what round each set of measurements was collected in
+- make a column called "ind" that is block-pos (e.g. E1-34, E6-142, E7-1,...), this will be the key connecting all data sets
+
+# Damage data:
+- make a column "dround" that says what round each set of damage measurements was collected in
+- make a column called "ind" that is block-pos (e.g. E1-34, E6-142, E7-1,...), this will be the key connecting all data sets
+
+# Fitness data:
+- make a column called "ind" that is block-pos (e.g. E1-34, E6-142, E7-1,...), this will be the key connecting all data sets
+
+# populationinfo.csv
+
+
+## (2) Error-checking
+# Height data:
+# (A) Check for some more obvious issues
+- flag all measurements (veg, bud, flw, frt, abt) > 250 cm -- these are probably mistakes
+-- hard-code fix these after consulting paper datasheets in purple folder
+
+# (B) Look for issues in measurements within rounds
+Logically, measurements should follow bud>=flw>=frt>=abt>=veg.
+- make function heightOK() that takes in the Data dataframe and checks if the above condition is always satisfied for each plant within each round
+-- for each observation (plant during specific measurement round), make a temporary vector that stores its bud, flw, frt, abt, veg height (in that order)
+-- order the elements in this vector from biggest to smallest using order()
+--- it should always be that 
+
+- export as 2019_Heights_Clean.csv
+
+# Damage data:
+- export as 2019_Damage_Clean.csv
+
+# Fitness data:
+- (temporarily) take out plants with weights < -1 (so that mean_bag_weight > total_bag_weight by more than 1)
+-- these will need to be reweighed
+- export as 2019_Fitness_Clean.csv
+
+
+## (3) Putting it all together
+- use dplyr left_join(x,y,key="") to join together populationinfo and height, populationinfo and damage, populationinfo and fitness
+
+
+

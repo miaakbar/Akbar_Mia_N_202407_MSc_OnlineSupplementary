@@ -1,0 +1,338 @@
+---
+title: "Error Checking"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Use this .rmd to investigate and keep track of potential problems with data collection or manipulation and find solutions. 
+
+# Setup
+
+```{r}
+library(tidyverse)
+library(viridis)
+```
+
+```{r}
+source("http://bit.ly/theme_pub")
+```
+
+# Load Data
+
+```{r}
+setwd("./")
+DevDat <- read.csv("./Data/Combined/QUBSLythrumCG_Development.csv")
+Dat <- read.csv("./Data/Combined/QUBSLythrumCG.csv")
+NoGrow <- read.csv("./Data/Combined/NoGrow.csv")
+```
+
+
+# Better cleaning of vegetative height data 
+
+```{r}
+Veg <- DevDat %>% select(Ind, Julian, Veg, round, Year, POP, FAM, BLOCK)
+MeanVeg <- Veg %>% 
+  group_by(Year, round, BLOCK, POP, FAM) %>% 
+  summarise(MeanVeg = mean(Veg, na.rm = TRUE))
+Veg <- merge(Veg, MeanVeg, by = c("Year","round", "BLOCK", "POP","FAM")) %>% arrange(Ind, Year, Julian)
+```
+
+## Too big, too soon 
+
+```{r}
+BigBoysLong <- Veg %>% 
+  filter(Julian < 182) %>% 
+  group_by(Ind, Year) %>% 
+  filter(any(Veg > 110)) #3073 obs
+  
+BigBoys <- BigBoysLong %>% 
+  filter(Veg > 110) %>% 
+  distinct(Year,round,Ind, .keep_all = TRUE) #868 unique instances
+```
+
+Fix the following entries on a discretionary basis in `CombiningDevelopmentData.Rmd` & `CombiningDat.Rmd` based on divergence from mean at that time point and growth trajectory of the individual (Ind, Year, Julian, OldVeg, FixedVeg):
+
+E8-125, 2019, 141, 111, 11
+E3-188, 2020, 160, 226, 26
+E6-36, 2022, 168, 24, 124
+E8-7, 2020, 160, 199.5, 19.5
+E1-64, 2020, 167, 233, 23
+E10-86, 2023, 179, 187, 87
+E6-43, 2019, 178, 177, 77
+E9-133, 2018, 172, 148, 48
+E8-125, 2019, 141, 111, 11
+
+## Too different
+
+```{r}
+NotLikeOtherGirls <- Veg %>% 
+  filter(Veg > MeanVeg + 35 | Veg < MeanVeg -35) %>% 
+  select(Ind,Year) %>% 
+  distinct(Year, Ind, .keep_all = TRUE) #14 unique instances, 11 ind. 
+
+NotLikeOtherGirlsLong <- right_join(Veg, NotLikeOtherGirls, by = c("Year", "Ind")) %>% 
+  arrange(Ind,Year,Julian)
+
+```
+
+Fix the following entries on a discretionary basis in `CombiningDevelopmentData.Rmd` & `CombiningDat.Rmd` based on divergence from mean at that time point and growth trajectory of the individual and other developmental measurements found in `DevDat`.
+
+(Ind, Year, Julian, OldVeg, FixedVeg):
+
+E10-116, 2022, 235, 10, 110
+E6-50, 2022, 175, 10, 110
+E4-61, 2022 - NA (too much weirdness)
+E6-11, 2022, 235, 15, 150
+E6-24, 2019, 225, 122, NA
+E6-24, 2023, 187, 72, 52
+E6-50, 2022, 175, 10, 110
+
+
+# Plants that shrink 
+
+```{r}
+LilShrinkers <- data.frame(Ind = character(), Year = integer(), stringsAsFactors = FALSE)
+
+for (ind in unique(Veg$Ind)) {
+  for (year in unique(Veg$Year)) {
+    subset_data <- Veg %>% filter(!is.na(Veg)) %>% filter(Ind == ind & Year == year)
+    if (nrow(subset_data) >= 2) {
+       for (i in 2:nrow(subset_data)) {
+        if (subset_data$Veg[i - 1] - subset_data$Veg[i] > 50) {
+          LilShrinkers <- rbind(LilShrinkers, data.frame(Ind = ind, Year = year))
+          break  
+        }
+      }
+    }
+  }
+}
+LilShrinkers <- right_join(Veg, LilShrinkers) %>% arrange(Ind,Year,Julian) #2000 obs to look for
+length(unique(LilShrinkers$Ind)) ##118 individuals do a big shrink. 
+write.csv(LilShrinkers, "./Data/Problems/ShrinkingPlants.csv", row.names = FALSE)
+```
+
+
+Fix the following entries on a discretionary basis in `CombiningDevelopmentData.Rmd` & `CombiningDat.Rmd` based on divergence from mean at that time point and growth trajectory of the individual and other developmental measurements found in `DevDat`. **As of 2024-05-13, I do not think it is worth it to do this (at least not right now, it is too time-consuming).**
+
+(Ind, Year, Julian, OldVeg, FixedVeg):
+
+E1-115, 2020, 226, 46, 146
+E1-17, 2020, 188, 34, 64
+E1-170, 2020, 182, 46, 76
+E1-170, 2020, 226, 182, NA
+E1-181, 2019, 272, 64, 84
+E1-55, 2020, 220, 2, 62
+E1-71, 2019, 210, 15, 150
+E10-124, 2020, 182, 5, 65
+E10-124, 2022, 245, 115, 175
+E10-129, 2023, 226, 199, 119
+E10-140, 2022, 193, 34, 84
+E10-154, 2020, 210, 166, 66
+E10-182, 2020, 197, 87, 37
+E10-182, 2022, 200, 162, 62
+E10-192, 2021, 
+
+
+
+# Individuals that have weight but no FT
+
+This could indicate that individuals flowered when there were no longer students around to record their height measurements. 
+
+```{r}
+WeightnoFT <- Dat %>%
+  group_by(Ind, Year) %>%
+  filter(Weight != 0 & is.na(FT)) %>% 
+  select(Ind, Year, LAT, Treatment, FT, Weight) %>% 
+  filter(Weight > 1)
+
+BigWeightnoFT <- WeightnoFT %>% 
+  filter(Weight > 5) #>5g feels like a reasonable threshold for this mattering but I should probably make this threshold based off some kind of statistical measure. 
+```
+
+Individuals had a biomass measurement with no flowering time 128 times. Out of these, only 19 exceeded the 5 gram mark indicating they may be a potential problem. Could be worth it to exclude or estimate flowering time for these individuals. I will investigate each case individually but have not as of 2024-05-08. 
+
+## Did any of these guys have a fruit measurement?
+
+```{r}
+FruitnoFT <- semi_join(DevDat, BigWeightnoFT, by = c("Ind","Year")) %>%
+  group_by(Ind,Year) %>%
+  filter(!all(is.na(Fert))) %>% 
+  filter(!is.na(Weight))
+  
+FruitnoFTList <- FruitnoFT %>% 
+  distinct(Ind, Year, .keep_all = TRUE) %>% 
+  select(Ind,Year,POP,LAT,FT) #Flowered, fruited, no biomass (potential problem)
+```
+
+None of these individuals fruited during the season indicating this was not a missed measurement.
+
+# Individuals that have an FT but no harvested biomass 
+
+This could indicate that individuals flowered but were not pollinated (in this case they would also have no fruit measurement). 
+
+```{r}
+FTnoWeight <- Dat %>%
+  group_by(Ind, Year) %>%
+  filter(Weight == 0 & !is.na(FT)) %>% 
+  select(Ind, Year, LAT, Treatment, FT, Weight) #375
+```
+
+## How many of the individuals that flowered had no biomass also never had a fruit measurement in a given year?
+
+```{r}
+FTnoWeightnoFruit <- semi_join(DevDat, FTnoWeight, by = c("Ind","Year")) %>%
+  group_by(Ind,Year) %>%
+  filter(all(is.na(Fert))) %>%
+  distinct(Ind, Year, .keep_all = TRUE) %>% 
+  select(Ind,Year,Treatment,FT,Weight)  #Flowered but were probably never pollinated
+```
+
+Less than half half! This is okay and has a reasonable biological explanation.  
+
+## What about ones that flowered, fruited but still had no biomass? 
+
+```{r}
+FTnoWeightyesFruit <- semi_join(DevDat, FTnoWeight, by = c("Ind","Year")) %>%
+  group_by(Ind,Year) %>%
+  filter(!all(is.na(Fert))) %>% 
+  filter(!is.na(Weight))
+  
+FTnoWeightyesFruitList <- FTnoWeightyesFruit %>% 
+  distinct(Ind, Year, .keep_all = TRUE) %>% 
+  select(Ind,Year,POP,LAT,FT) #Flowered, fruited, no biomass (potential problem)
+```
+
+Over the years, 117 flowered, fruited and had no biomass which may pose a potential issue. If they flowered/fruited for a very short period of time, it would make sense to have fitness ~= to zero. However, if they had an extensive reproductive period, this could represent an error.
+
+### Looking at the fruit measurements specifically to figure out what may have happened. 
+
+```{r}
+FruitnoWeight <- FTnoWeightyesFruit %>% 
+  ungroup() %>% 
+  mutate(Ind = as.factor(Ind)) %>% 
+  filter(!is.na(Fert)) %>% 
+  select(Ind,Date,Veg,Bud,Flr,Fert,FT,Treatment,Year) %>% 
+  mutate(Fert_Length = Fert - Veg) %>% 
+  arrange(Year,Ind,Date)
+#n = 268
+
+```
+
+```{r}
+SprayedFruitnoWeight <- FruitnoWeight %>% 
+  filter(Treatment == "Sprayed")
+
+UnsprayedFruitnoWeight <- FruitnoWeight %>% 
+  filter(Treatment == "Unsprayed")
+```
+
+Based on how I cleaned the Weight measurements, this means that at least 172 of these had a harvested fruit that was equal to or less than the mean empty bag weight. This could represent a harvesting error? Not really sure what to do about this. Maybe exclude them from any analysis regarding fitness? Exporting to .csv to think about later.
+
+```{r}
+write.csv(FTnoWeightyesFruitList, "./Data/Problems/FruitnoWeight.csv")
+```
+
+
+# Individuals that have fruit measurements without flowering 
+
+```{r}
+FruitnoFlwr <- DevDat %>%
+  group_by(Ind, Year) %>%
+  mutate(uh_oh = ifelse(all(is.na(Flr)) & !all(is.na(Fert)), 1, 0)) %>% 
+  filter(uh_oh == 1) %>% 
+  filter(Weight != 0) %>% 
+  select(Ind, Date, Veg, Bud, Flr, Fert, Year, Julian, Weight)
+
+FruitnoFlwrList <- FruitnoFlwr %>% 
+  distinct(Ind, Year, .keep_all = TRUE) %>% 
+  select(Ind,Year,Weight)
+```
+
+All of these individuals will have NA for Flowering Duration, Fruiting Duration, MaxFlwr and MaxFruit? However, if they flowered in a brief window and have fitness, it may make sense to manually adjust. their FT. I think I will estimate their flowering as the census before their fruiting (within reason) so that data management remains simple. 
+
+The following Ind/Year combinations should probably be excluded from the study:
+
+- 2020
+  - E3-107: Height measurments record plant growing 50 cm in three days. 
+  
+- 2021
+  - E9-177: Window to estimate flowering is too large (Aug5-23)
+  - E10-151: Height measurments record plant growing 50 cm in three days.
+  
+- 2022
+  - E9-32: Window to estimate flowering is too large (Jul7-Aug15)
+  
+The following Ind/Year combinations will have their FT manually updated in the `CombiningData.Rmd` and `CombiningDevelopmentData.Rmd'
+
+- 2020
+  - E1-175	Flowered briefly between July 20-28. 
+  - E8-154	FT July 20-28
+  - E12-109	Flowered briefly between July 21-28. Will manually add estimate of flowering
+
+- 2021
+  - E3-51	Flowered briefly between Aug 16-19. 
+  - E3-167	Flowered between Aug 9 and 16. 
+  - E6-149	Flowered between July 26 and 30
+  - E6-196	Flowered between Aug 27-30
+  - E9-177	FT Aug 5-23
+  - E9-180	FT Aug 26-30
+ 
+- 2022
+  - E4-25	Flowered between Aug 9 and 15. 
+  - E4-79	Flowered between Aug 9 and 15. 
+  - E9-63	FT Aug 9-15
+  - E9-89	FT Aug15-23
+  - E9-108	FT Aug 9-15
+  - E9-161	FT Jul26-Aug9
+  - E9-162	FT Jul26-Aug9
+  - E9-202	FT Jul26-Aug9
+
+# Individuals that have a flowering time but no flower length 
+
+```{r}
+Max <- DevDat %>% 
+  group_by(Ind, Year) %>% 
+  summarise(MaxFlwr = max(Flr_Length, na.rm=TRUE),
+            MaxFert = max(Fert_Length, na.rm=TRUE),
+            Day_MaxFlwr = Julian[which.max(Flr_Length)]) %>% 
+  subset(MaxFlwr != -Inf) %>% 
+  subset(MaxFert != -Inf)
+
+Dat <- left_join(Dat,Max)
+```
+
+In this case, Weight = 0 presumably means that the individuals flowered but did not fruit which although interesting, is not really cause for concern. 
+
+```{r}
+FTNoFlr <- Dat %>%
+  group_by(Year, Ind) %>%
+  filter(!is.na(FT) & is.na(MaxFlwr)) %>%
+  filter(Weight != 0) %>% 
+  distinct(Ind, .keep_all = TRUE) %>% 
+  select(Ind,Year,FT,MaxFlwr,Weight)
+```
+
+## Negative Flr length 
+
+```{r}
+NegativeFlr <- DevDat %>%
+  filter(Flr_Length < 0) %>% 
+  filter(Year == "2018" | Year == "2019")
+```
+
+## Negative Fert length 
+
+```{r}
+NegativeFert <- DevDat %>%
+  filter(Fert_Length < 0) %>% 
+  filter(Year == "2018" | Year == "2019")
+```
+
+# No Vegetative Height
+
+Some individuals never have a vegetative height measurement in a season (131 obs, 65 unique individuals). Detailed list found in `NoGrow.csv` Examining trade-offs across years is an argument for including them. I could exclude ones that did not have measurements in the first three years of the experiment and include the others by changing NA to 0. If we try and examine trade-offs in vegetative growth across years, including these may become important. Furthermore, comparing final vegetative height between the sprayed and unsrpayed is only meaningful if we include the individuals that were barely able to grow at all. However, I know some of these were classified as "dead" and as a result, have sparse and irregular measurements (within and between years) making them unreliable. It is hard to say if they did not grow at all or if they were simply not measured because someone classified them as "dead." As of 2024-05-12, I exclude these obs in the `CombiningData.Rmd` by left_joining (FVeg, FT) instead of (FT,Veg). Further *careful* investigation is necessary to determine whether these 65 unique individuals should be removed from the entire analysis.
+
+## What are the interyear correlations like for these 65 Ind? 
+
+

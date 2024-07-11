@@ -1,0 +1,84 @@
+---
+title: "Natural selection"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup
+
+```{r load libraries, include = FALSE}
+library(viridis) 
+library(Hmisc)
+library(lme4)
+library(lmtest)
+library(lmerTest)
+library(tidyverse)
+```
+
+```{r}
+setwd("./")
+AvgPC <- read.csv("./Data/Combined/QUBSLythrumAverageFTS.csv")
+```
+
+## Find MAM
+
+Is the interaction of treatment important?
+```{r}
+ModFull<- lmer(LogFit ~ Treatment * (PC1_avg + I(PC1_avg^2) + PC2_avg + I(PC2_avg^2)) + POP + (1|FAM), data = AvgPC)
+
+Mod0 <- lmer(LogFit ~ Treatment + PC1_avg + I(PC1_avg^2) + PC2_avg + I(PC2_avg^2) + POP + (1|FAM) + Treatment:PC1_avg + Treatment:I(PC1_avg^2) + Treatment:PC2_avg, data = AvgPC) 
+
+Mod1 <- lmer(LogFit ~ Treatment + PC1_avg + I(PC1_avg^2) + PC2_avg + I(PC2_avg^2) + POP + (1|FAM) + Treatment:PC1_avg + Treatment:I(PC1_avg^2), data = AvgPC) 
+
+Mod2 <-  lmer(LogFit ~ Treatment + PC1_avg + I(PC1_avg^2) + PC2_avg + I(PC2_avg^2) + POP + (1|FAM) + Treatment:PC1_avg + Treatment:I(PC2_avg^2) + Treatment:PC2_avg, data = AvgPC) 
+
+Mod3 <- lmer(LogFit ~ Treatment + PC1_avg + I(PC1_avg^2) + PC2_avg + I(PC2_avg^2) + POP + (1|FAM) + Treatment:PC2_avg + Treatment:I(PC2_avg^2), data = AvgPC) 
+
+lrtest(Mod0, ModFull) #Treat*PC2^2 - no
+lrtest(Mod1, Mod0) #Treat*PC2 - yes
+lrtest(Mod2, ModFull) #Treat*PC1^2 - no
+lrtest(Mod3, Mod2) #Treat*PC1 - yes
+
+Mod0<-Mod1<-Mod2<-Mod3<-NA
+```
+
+## Selection gradients, standard errors, significance 
+
+```{r}
+AvgPC <- AvgPC %>% 
+  group_by(Treatment) %>% 
+  mutate(RelFit = Fit / mean(Fit, na.rm=TRUE))
+```
+
+```{r}
+ModLin <- lmer(RelFit ~ (scale(PC1_avg) + scale(PC2_avg)) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Unsprayed"))
+ModQuad <- lmer(RelFit ~ (scale(PC1_avg) + scale(I(PC1_avg^2)) + scale(PC2_avg) + scale(I(PC2_avg^2))) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Unsprayed"))
+
+summary(ModLin)
+summary(ModQuad)
+```
+
+```{r}
+ModLin <- lmer(RelFit ~ (scale(PC1_avg) + scale(PC2_avg)) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Sprayed"))
+ModQuad <- lmer(RelFit ~ (scale(PC1_avg) + scale(I(PC1_avg^2)) + scale(PC2_avg) + scale(I(PC2_avg^2))) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Sprayed"))
+
+summary(ModLin)
+summary(ModQuad)
+```
+
+```{r}
+ModLin <- lmer(LogFit ~ (scale(PC1_avg) + scale(PC2_avg)) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Unsprayed"))
+ModQuad <- lmer(LogFit ~ (scale(PC1_avg) + scale(I(PC1_avg^2)) + scale(PC2_avg) + scale(I(PC2_avg^2))) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Unsprayed"))
+
+anova(ModLin)
+anova(ModQuad)
+```
+
+```{r}
+ModLin <- lmer(LogFit ~ (scale(PC1_avg) + scale(PC2_avg)) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Sprayed"))
+ModQuad <- lmer(LogFit ~ (scale(PC1_avg) + scale(I(PC1_avg^2)) + scale(PC2_avg) + scale(I(PC2_avg^2))) + POP + (1|FAM), data = subset(AvgPC, Treatment == "Sprayed"))
+
+anova(ModLin)
+anova(ModQuad)
+```

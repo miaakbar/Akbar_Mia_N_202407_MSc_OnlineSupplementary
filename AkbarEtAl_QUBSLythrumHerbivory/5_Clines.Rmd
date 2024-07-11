@@ -1,0 +1,247 @@
+---
+title: "Latitudinal Clines"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup
+
+```{r load libraries, include = FALSE}
+library(viridis) 
+library(Hmisc)
+library(lme4)
+library(lmtest)
+library(lubridate)
+library(gridExtra)
+library(cowplot)
+library(tidyverse)
+library(moments)
+library(broom.mixed)
+```
+
+```{r}
+setwd("./")
+AvgPC <- read.csv("./Data/Combined/QUBSLythrumAverageFTS.csv")
+```
+
+# Testing for clines
+
+## LRT w random effect of family
+
+```{r}
+dependent_vars <- c("PC1_avg","PC1_skew","PC1_var", "LogFit")
+
+results <- list()
+
+
+lrt_results <- data.frame()
+coef_results <- data.frame()
+anova_results <- data.frame()
+
+for (dep_var in dependent_vars) {
+  
+  # formula
+  formula_full <- as.formula(paste(dep_var, "~ Treatment * (LAT + I(LAT^2)) + (1|POP) + (1|FAM)"))
+  formula_mod0 <- as.formula(paste(dep_var, "~ Treatment + LAT + I(LAT^2) + (1|POP) + (1|FAM) + Treatment:LAT"))
+  formula_mod1 <- as.formula(paste(dep_var, "~ Treatment + LAT + I(LAT^2) + (1|POP) + (1|FAM) + Treatment:I(LAT^2)"))
+  formula_mod2 <- as.formula(paste(dep_var, "~ Treatment + LAT + I(LAT^2) + (1|POP) + (1|FAM)"))
+  formula_mod3 <- as.formula(paste(dep_var, "~ LAT + I(LAT^2) + (1|POP) + (1|FAM)"))
+  formula_mod4 <- as.formula(paste(dep_var, "~ Treatment + LAT + (1|POP) + (1|FAM)"))
+  formula_mod5 <- as.formula(paste(dep_var, "~ Treatment + (1|POP) + (1|FAM)"))
+  
+  # fit models
+  FullMod <- lmer(formula_full, data = AvgPC)
+  Mod0 <- lmer(formula_mod0, data = AvgPC)
+  Mod1 <- lmer(formula_mod1, data = AvgPC)
+  Mod2 <- lmer(formula_mod2, data = AvgPC)
+  Mod3 <- lmer(formula_mod3, data = AvgPC)
+  Mod4 <- lmer(formula_mod4, data = AvgPC)
+  Mod5 <- lmer(formula_mod5, data = AvgPC)
+  
+  # lrt 
+  lrtest0 <- lrtest(Mod0, FullMod)
+  lrtest1 <- lrtest(Mod1, Mod0)
+  lrtest2 <- lrtest(Mod3, Mod2)
+  lrtest3 <- lrtest(Mod3, Mod4)
+  lrtest4 <- lrtest(Mod4, Mod5)
+ 
+Mod1<-Mod2<-Mod3<-Mod4<-Mod5<-FullMod<- NA # in case of convergence error
+
+  # store lrt
+  lrt_results <- rbind(lrt_results, data.frame(
+    DependentVar = dep_var,
+    LRT_Comparison = c("Mod0 vs FullMod", "Mod1 vs Mod0", "Mod3 vs Mod2", "Mod3 vs Mod4", "Mod4 vs Mod5"),
+    ChiSq = c(lrtest0$Chisq[2], lrtest1$Chisq[2], lrtest2$Chisq[2], lrtest3$Chisq[2], lrtest4$Chisq[2]),
+    PValue = c(lrtest0$`Pr(>Chisq)`[2], lrtest1$`Pr(>Chisq)`[2], lrtest2$`Pr(>Chisq)`[2], lrtest3$`Pr(>Chisq)`[2], lrtest4$`Pr(>Chisq)`[2])
+  ))
+
+lrtest0<-lrtest1<-lrtest2<-lrtest3<-lrtest4 <- NA  
+}
+```
+
+### Extract slopes and p_values for significant effects seperately for each treatment
+
+```{r}
+library(lmerTest)
+for (dep_var in dependent_vars) {
+
+  data_sprayed <- subset(AvgPC, Treatment == "Sprayed")
+  data_unsprayed <- subset(AvgPC, Treatment == "Unsprayed")
+  
+
+  ScaleMod_sprayed <- lmer(as.formula(paste("scale(", dep_var, ") ~ (scale(LAT) + scale(I(LAT^2))) + (1|POP) + (1|FAM)")), data = data_sprayed)
+  ScaleMod_unsprayed <- lmer(as.formula(paste("scale(", dep_var, ") ~ (scale(LAT) + scale(I(LAT^2))) + (1|POP) + (1|FAM)")), data = data_unsprayed)
+  
+
+  scale_sprayed_tidy <- tidy(ScaleMod_sprayed)
+  coef_results <- rbind(coef_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "Sprayed",
+    Predictor = scale_sprayed_tidy$term,
+    Estimate = scale_sprayed_tidy$estimate,
+    StdError = scale_sprayed_tidy$std.error
+  ))
+  
+
+  scale_unsprayed_tidy <- tidy(ScaleMod_unsprayed)
+  coef_results <- rbind(coef_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "Unsprayed",
+    Predictor = scale_unsprayed_tidy$term,
+    Estimate = scale_unsprayed_tidy$estimate,
+    StdError = scale_unsprayed_tidy$std.error
+  ))
+  
+
+  anova_sprayed <- anova(ScaleMod_sprayed)
+  anova_results <- rbind(anova_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "sprayed",
+    Predictor = rownames(anova_sprayed),
+    FValue = anova_sprayed$`F value`,
+    PValue = anova_sprayed$`Pr(>F)`
+  ))
+  
+
+  anova_unsprayed <- anova(ScaleMod_unsprayed)
+  anova_results <- rbind(anova_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "unsprayed",
+    Predictor = rownames(anova_unsprayed),
+    FValue = anova_unsprayed$`F value`,
+    PValue = anova_unsprayed$`Pr(>F)`
+  ))
+}
+```
+
+
+## Random effect of pop only 
+
+```{r}
+
+dependent_vars <- c("PC2_avg","PC2_skew", "PC2_var", "LogitDam")
+
+
+results <- list()
+
+
+lrt_results <- data.frame()
+coef_results <- data.frame()
+anova_results <- data.frame()
+
+for (dep_var in dependent_vars) {
+  
+  # formula
+  formula_full <- as.formula(paste(dep_var, "~ Treatment * (LAT + I(LAT^2)) + (1|POP)"))
+  formula_mod0 <- as.formula(paste(dep_var, "~ Treatment + LAT + I(LAT^2) + (1|POP) + Treatment:LAT"))
+  formula_mod1 <- as.formula(paste(dep_var, "~ Treatment + LAT + I(LAT^2) + (1|POP)  + Treatment:I(LAT^2)"))
+  formula_mod2 <- as.formula(paste(dep_var, "~ Treatment + LAT + I(LAT^2) + (1|POP)"))
+  formula_mod3 <- as.formula(paste(dep_var, "~ LAT + I(LAT^2) + (1|POP)"))
+  formula_mod4 <- as.formula(paste(dep_var, "~ Treatment + LAT + (1|POP)"))
+  formula_mod5 <- as.formula(paste(dep_var, "~ Treatment + (1|POP)"))
+  
+  # fit models
+  FullMod <- lmer(formula_full, data = AvgPC)
+  Mod0 <- lmer(formula_mod0, data = AvgPC)
+  Mod1 <- lmer(formula_mod1, data = AvgPC)
+  Mod2 <- lmer(formula_mod2, data = AvgPC)
+  Mod3 <- lmer(formula_mod3, data = AvgPC)
+  Mod4 <- lmer(formula_mod4, data = AvgPC)
+  Mod5 <- lmer(formula_mod5, data = AvgPC)
+  
+  # lrt 
+  lrtest0 <- lrtest(Mod0, FullMod)
+  lrtest1 <- lrtest(Mod1, Mod0)
+  lrtest2 <- lrtest(Mod3, Mod2)
+  lrtest3 <- lrtest(Mod3, Mod4)
+  lrtest4 <- lrtest(Mod4, Mod5)
+  
+  Mod1<-Mod2<-Mod3<-Mod4<-Mod5<-FullMod<- NA # in case of convergence error
+
+
+  lrt_results <- rbind(lrt_results, data.frame(
+    DependentVar = dep_var,
+    LRT_Comparison = c("Mod0 vs FullMod", "Mod1 vs Mod0", "Mod3 vs Mod2", "Mod3 vs Mod4", "Mod4 vs Mod5"),
+    ChiSq = c(lrtest0$Chisq[2], lrtest1$Chisq[2], lrtest2$Chisq[2], lrtest3$Chisq[2], lrtest4$Chisq[2]),
+    PValue = c(lrtest0$`Pr(>Chisq)`[2], lrtest1$`Pr(>Chisq)`[2], lrtest2$`Pr(>Chisq)`[2], lrtest3$`Pr(>Chisq)`[2], lrtest4$`Pr(>Chisq)`[2])
+  ))
+
+lrtest0<-lrtest1<-lrtest2<-lrtest3<-lrtest4 <- NA  
+}
+```
+
+### Extract slopes and p_values for significant effects seperately for each treatment
+
+```{r}
+library(lmerTest)
+for (dep_var in dependent_vars) {
+
+  data_sprayed <- subset(AvgPC, Treatment == "Sprayed")
+  data_unsprayed <- subset(AvgPC, Treatment == "Unsprayed")
+  
+
+  ScaleMod_sprayed <- lmer(as.formula(paste("scale(", dep_var, ") ~ (scale(LAT) + scale(I(LAT^2))) + (1|POP)")), data = data_sprayed)
+  ScaleMod_unsprayed <- lmer(as.formula(paste("scale(", dep_var, ") ~ (scale(LAT) + scale(I(LAT^2))) + (1|POP)")), data = data_unsprayed)
+  
+
+  scale_sprayed_tidy <- tidy(ScaleMod_sprayed)
+  coef_results <- rbind(coef_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "Sprayed",
+    Predictor = scale_sprayed_tidy$term,
+    Estimate = scale_sprayed_tidy$estimate,
+    StdError = scale_sprayed_tidy$std.error
+  ))
+  
+
+  scale_unsprayed_tidy <- tidy(ScaleMod_unsprayed)
+  coef_results <- rbind(coef_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "Unsprayed",
+    Predictor = scale_unsprayed_tidy$term,
+    Estimate = scale_unsprayed_tidy$estimate,
+    StdError = scale_unsprayed_tidy$std.error
+  ))
+  
+
+  anova_sprayed <- anova(ScaleMod_sprayed)
+  anova_results <- rbind(anova_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "sprayed",
+    Predictor = rownames(anova_sprayed),
+    FValue = anova_sprayed$`F value`,
+    PValue = anova_sprayed$`Pr(>F)`
+  ))
+  
+
+  anova_unsprayed <- anova(ScaleMod_unsprayed)
+  anova_results <- rbind(anova_results, data.frame(
+    DependentVar = dep_var,
+    Treatment = "unsprayed",
+    Predictor = rownames(anova_unsprayed),
+    FValue = anova_unsprayed$`F value`,
+    PValue = anova_unsprayed$`Pr(>F)`
+  ))
+}
+```

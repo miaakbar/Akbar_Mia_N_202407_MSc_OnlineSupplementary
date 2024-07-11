@@ -1,0 +1,145 @@
+---
+title: "PCA"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup 
+
+```{r load libraries, include = FALSE}
+library(viridis) 
+library(lme4)
+library(lmtest)
+library(gridExtra)
+library(cowplot)
+library(tidyverse)
+library(moments)
+```
+
+
+```{r load theme and manipulate data, include = FALSE}
+setwd("./")
+ifelse((!dir.exists(file.path("./", "Figures"))), (dir.create(file.path("./", "Figures"))), FALSE)
+
+source("http://bit.ly/theme_pub")
+
+Dat <- read.csv("./Data/Combined/QUBSLythrumCG_GDD.csv")
+
+Dat <- Dat %>%
+  mutate(ExperimentalYears = ifelse(BLOCK %in% c("E1", "E2", "E7", "E8", "E11", "E12"), 1, 2), Region = case_when(LAT <= 41.57154 ~ "South", LAT <= 44.54749 ~ "Mid", TRUE ~ "North")) %>% 
+  mutate_at(vars(POP,FAM,BLOCK,Treatment,Year), as.factor)
+
+Dat <- Dat %>%
+  group_by(Ind) %>%
+  mutate(AbsFit = sum(Weight, na.rm = TRUE) / ExperimentalYears) %>%
+  ungroup()  
+Dat <- Dat %>% dplyr::select(-ExperimentalYears)
+
+Dat$FlowerBinary <- ifelse(is.na(Dat$FT), 0, 1)
+```
+
+# PCA
+
+```{r, echo=FALSE}
+PCDat <- Dat %>% 
+  dplyr::select("Ind","LAT","POP", "FAM", "Treatment", "FT_GDD10", "FlwrVeg", "AbsFit", "PropDam") %>%
+  filter(!is.na(FT_GDD10)) %>% 
+  filter(!is.na(FlwrVeg))
+
+pcainput <- as.matrix(PCDat[, !(names(PCDat) %in% c("LAT", "FAM", "POP","Treatment","Year","AbsFit","PropDam","Ind"))])
+indpca <- prcomp(pcainput, center = TRUE, scale. = TRUE)
+indpca$sdev^2 / sum(indpca$sdev^2) # proportion variance explained 
+scores <- as.data.frame(indpca$x)
+PCDat <- cbind(PCDat, scores)
+  
+PCDat <- PCDat %>% mutate(PC1 = ((PC1)*-1), 
+                          PC2 = ((PC2)*-1))
+```
+
+## `PC_avg` : the average axis value for plants across years
+
+```{r}
+AvgPC <- PCDat %>% 
+  group_by(Ind, Treatment,LAT, POP, FAM) %>% 
+  summarise(FT = mean(FT_GDD10, na.rm = TRUE),
+            FlwrVeg = mean(FlwrVeg, na.rm =TRUE),
+            PC1_avg = mean(PC1, na.rm = TRUE),
+            PC2_avg = mean(PC2, na.rm = TRUE),
+            PC1_skew = skewness(PC1, na.rm=TRUE),
+            PC2_skew = skewness(PC2, na.rm=TRUE),
+            PC1_var = var(PC1, na.rm=TRUE),
+            PC2_var = var(PC2, na.rm=TRUE),
+            Fit = mean(AbsFit, na.rm = TRUE),
+            Dam = mean(PropDam, na.rm = TRUE)) %>% 
+  mutate_at(vars(Ind,POP,FAM,Treatment), as.factor)
+```
+
+
+```{r}
+write.csv(AvgPC, "./Data/Combined/QUBSLythrumAverageFTS.csv")
+```
+
+# Figures 
+
+```{r}
+AvgPCPop <- PCDat %>% 
+  group_by(Treatment, LAT) %>% 
+  summarise(FT = mean(FT_GDD10, na.rm = TRUE),
+            FlwrVeg = mean(FlwrVeg, na.rm =TRUE),
+            PC1_avg = mean(PC1, na.rm = TRUE),
+            PC2_avg = mean(PC2, na.rm = TRUE),
+            PC1_skew = skewness(PC1, na.rm=TRUE),
+            PC2_skew = skewness(PC2, na.rm=TRUE),
+            PC1_var = var(PC1, na.rm=TRUE),
+            PC2_var = var(PC2, na.rm=TRUE),
+            Fit = mean(AbsFit, na.rm = TRUE)) #for plotting
+```
+
+```{r, echo = FALSE}
+PC <- ggplot(AvgPCPop, aes(x = PC1_avg, y = (PC2_avg), colour = LAT, shape = Treatment)) +
+  geom_point(size = 3) +
+  labs(x = "PC1_avg", y = "PC2_avg") +
+  scale_color_viridis(option="magma",direction = -1) +
+  scale_shape_manual(values = c(16,2)) +
+  theme_pub() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+    strip.text = element_text(size = 10))
+
+PC1Fit <- ggplot(AvgPCPop, aes(x = PC1_avg, y = Fit, colour = LAT, shape = Treatment, linetype = Treatment)) +
+  geom_point(size = 3) +
+  geom_smooth(data = subset(AvgPCPop, Treatment == "Sprayed"), method = "lm", formula = y ~ x, se = FALSE, colour = "black") +
+  labs(x = "PC1_avg", y = "Total Fecundity (g)") +
+  scale_color_viridis(option="magma",direction = -1) +
+  scale_shape_manual(values = c(16,2)) +
+  theme_pub() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+    strip.text = element_text(size = 10))
+
+PC2Fit <- ggplot(AvgPCPop, aes(x = PC2_avg, y = Fit, colour = LAT, shape = Treatment, linetype = Treatment)) +
+  geom_point(size = 3) +
+  geom_smooth(method="lm", formula = y ~ x, colour = "black", se = FALSE) +
+  labs(x = "PC2_avg", y = "Total Fecundity (g)") +
+  scale_color_viridis(option="magma",direction = -1) +
+  scale_shape_manual(values = c(16,2)) +
+  theme_pub() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+    strip.text = element_text(size = 10))
+```
+
+
+```{r fig.cap = "Population mean values for average PCA axis values in a PCA representing the correlation between flowering time and vegetative size at flowering in *Lythrum salicaria* plants sprayed with insecticide and unsprayed control plots over six years. PC1 represents a genetic correlation between vegetative size at flowering and flowering time (FTS). Variation in FTS is consistent with a shifting optimum value along a latitudinal gradient related to adaptation to growing season length. Higher values of PC1 represent populations that flower late and large. The variance and skewness of the PC1 phenotype frequency against latitude are also shown to evalutate predictions made by the Price equation. Total fitness is measured as the sum of final reproductive biomass in grams for each individual plant divided by the number of experimental years to capture potential costs of reproducing (or not) in a given year. Twenty populations are colour coded by latitude of origin, ranging from dark colours in the north (48 \u00B0 N) to light colours in the south (38 \u00B0 N) grown in a common garden at the Queen's University Biological Station north of Kingston, ON.", echo = FALSE}
+pdf("./Figures/Fig3PCAxes.pdf",width=6.5,height=6.5)
+PC
+dev.off()
+```
+
+
+```{r fig.cap = "Population mean values for average PCA axis values in a PCA representing the correlation between flowering time and vegetative size at flowering in *Lythrum salicaria* plants sprayed with insecticide and unsprayed control plots over six years. PC1 represents a genetic correlation between vegetative size at flowering and flowering time (FTS). Variation in FTS is consistent with a shifting optimum value along a latitudinal gradient related to adaptation to growing season length. Higher values of PC1 represent populations that flower late and large. The variance and skewness of the PC1 phenotype frequency against latitude are also shown to evalutate predictions made by the Price equation. Total fitness is measured as the sum of final reproductive biomass in grams for each individual plant divided by the number of experimental years to capture potential costs of reproducing (or not) in a given year. Twenty populations are colour coded by latitude of origin, ranging from dark colours in the north (48 \u00B0 N) to light colours in the south (38 \u00B0 N) grown in a common garden at the Queen's University Biological Station north of Kingston, ON.", echo = FALSE}
+pdf("./Figures/Fig4PCSelection.pdf",width=6.5,height=6.5)
+plot_grid(PC1Fit, PC2Fit)
+dev.off()
+```

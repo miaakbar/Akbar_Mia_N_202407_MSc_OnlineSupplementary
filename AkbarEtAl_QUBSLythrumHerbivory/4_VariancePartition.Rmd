@@ -1,0 +1,284 @@
+---
+title: "Variance Partition Analysis"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup 
+
+```{r load libraries, include = FALSE}
+library(viridis) 
+library(Hmisc)
+library(lme4)
+library(lmtest)
+library(gridExtra)
+library(cowplot)
+library(tidyverse)
+library(moments)
+```
+
+```{r}
+setwd("./")
+ifelse((!dir.exists(file.path("./", "Figures"))), (dir.create(file.path("./", "Figures"))), FALSE)
+source("http://bit.ly/theme_pub")
+AvgPC <- read.csv("./Data/Combined/QUBSLythrumAverageFTS.csv")
+```
+
+# Phenotypic variation in herbivore damage, fecundity, PC1 and PC2
+
+## Fecundity 
+
+Population/family differences in fecundity between treatments represent *herbivore tolerance*.
+
+```{r}
+hist(AvgPC$Fit) #yuck!
+AvgPC <- AvgPC %>% 
+  mutate(LogFit = log(Fit+1)) #log-transform fitness
+hist(AvgPC$LogFit) #better
+``` 
+
+```{r}
+ModFull <- lmer(LogFit ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment) + (1|POP:Treatment), data = AvgPC)
+Mod0 <- lmer(LogFit ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment), data = AvgPC)
+Mod1 <- lmer(LogFit ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+Mod2 <- lmer(LogFit ~ 1 + (1|Treatment) + (1|FAM) + (1|FAM:Treatment), data = AvgPC)
+Mod3 <- lmer(LogFit ~ 1 + (1|Treatment) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+
+Mod4 <- lmer(LogFit ~ 1 + (1|Treatment) + (1|FAM) + (1|POP), data = AvgPC)
+Mod5 <- lmer(LogFit ~ 1 + (1|FAM) + (1|POP), data = AvgPC)
+Mod6 <- lmer(LogFit ~ 1 + (1|Treatment) + (1|POP), data = AvgPC)
+Mod7 <- lmer(LogFit ~ 1 + (1|FAM) + (1|Treatment), data = AvgPC)
+
+lrtest(Mod0, ModFull) #p*t
+lrtest(Mod1, ModFull) #f*t
+lrtest(Mod2, Mod0) #p
+lrtest(Mod3, Mod0) #f
+lrtest(Mod5, Mod4) #t
+```
+
+
+```{r}
+MAM <- lmer(LogFit ~ 1 + (1|Treatment) + (1|FAM)+ (1|POP) + (1|POP:Treatment), data = AvgPC)
+summary(MAM)
+
+# Extract variance components
+var_comp <- as.data.frame(VarCorr(MAM))
+random_effect_vars <- var_comp$vcov[1:4]  # Assuming the first 4 rows are the random effects variances
+residual_var <- attr(VarCorr(MAM), "sc")^2
+
+# Total variance
+total_var <- sum(random_effect_vars) + residual_var
+
+# Proportion of variance explained by each random effect
+prop_var_explained <- random_effect_vars / total_var
+names(prop_var_explained) <- var_comp$grp[1:4]  # Assign names to the proportions
+
+# Display the result
+prop_var_explained
+(total_var-residual_var)/total_var
+```
+
+
+## Damage
+
+Population/family differences in damage within treatments represent *herbivore resistance*.
+
+```{r}
+hist(AvgPC$Dam) #yuck!
+logit <- function(p, epsilon = 1e-10) {
+  p <- pmax(pmin(p, 1 - epsilon), epsilon)
+  log(p / (1 - p))
+}
+AvgPC$LogitDam <- sapply(AvgPC$Dam, logit)
+hist(AvgPC$LogitDam) #better
+```
+
+```{r}
+ModFull <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment) + (1|POP:Treatment), data = AvgPC)
+Mod0 <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment), data = AvgPC)
+Mod1 <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+Mod2 <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|FAM) + (1|FAM:Treatment), data = AvgPC)
+Mod3 <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+
+Mod4 <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|FAM) + (1|POP), data = AvgPC)
+Mod5 <- lmer(LogitDam ~ 1 + (1|FAM) + (1|POP), data = AvgPC)
+Mod6 <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|POP), data = AvgPC)
+Mod7 <- lmer(LogitDam ~ 1 + (1|FAM) + (1|Treatment), data = AvgPC)
+
+lrtest(Mod0, ModFull) #p*t
+lrtest(Mod1, ModFull) #f*t
+lrtest(Mod2, Mod0) #p
+lrtest(Mod3, Mod0) #f
+lrtest(Mod5, Mod4) #t
+```
+
+
+```{r}
+MAM <- lmer(LogitDam ~ 1 + (1|Treatment) + (1|POP), data = AvgPC)
+
+# Extract variance components
+var_comp <- as.data.frame(VarCorr(MAM))
+random_effect_vars <- var_comp$vcov[1:2]
+residual_var <- attr(VarCorr(MAM), "sc")^2
+
+# Total variance
+total_var <- sum(random_effect_vars) + residual_var
+
+# Proportion of variance explained by each random effect
+prop_var_explained <- random_effect_vars / total_var
+names(prop_var_explained) <- var_comp$grp[1:2]  # Assign names to the proportions
+
+# Display the result
+prop_var_explained
+(total_var-residual_var)/total_var
+```
+
+
+## PC1
+
+```{r}
+ModFull <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment) + (1|POP:Treatment), data = AvgPC)
+Mod0 <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment), data = AvgPC)
+Mod1 <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+Mod2 <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|FAM:Treatment), data = AvgPC)
+Mod3 <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+
+Mod4 <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP), data = AvgPC)
+Mod5 <- lmer(PC1_avg ~ 1 + (1|FAM) + (1|POP), data = AvgPC)
+Mod6 <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|POP), data = AvgPC)
+Mod7 <- lmer(PC1_avg ~ 1 + (1|FAM) + (1|Treatment), data = AvgPC)
+
+lrtest(Mod0, ModFull) #p*t
+lrtest(Mod1, ModFull) #f*t
+lrtest(Mod2, Mod0) #p
+lrtest(Mod3, Mod0) #f
+lrtest(Mod5, Mod4) #t
+```
+
+
+```{r}
+MAM <- lmer(PC1_avg ~ 1 + (1|Treatment) + (1|FAM)+ (1|POP), data = AvgPC)
+summary(MAM)
+
+# Extract variance components
+var_comp <- as.data.frame(VarCorr(MAM))
+random_effect_vars <- var_comp$vcov[1:3]
+residual_var <- attr(VarCorr(MAM), "sc")^2
+
+# Total variance
+total_var <- sum(random_effect_vars) + residual_var
+
+# Proportion of variance explained by each random effect
+prop_var_explained <- random_effect_vars / total_var
+names(prop_var_explained) <- var_comp$grp[1:3]  # Assign names to the proportions
+
+# Display the result
+prop_var_explained
+(total_var-residual_var)/total_var
+```
+
+## PC2
+
+```{r}
+ModFull <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment) + (1|POP:Treatment), data = AvgPC)
+Mod0 <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|FAM:Treatment), data = AvgPC)
+Mod1 <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+Mod2 <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|FAM:Treatment), data = AvgPC)
+Mod3 <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+
+Mod4 <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|FAM) + (1|POP), data = AvgPC)
+Mod5 <- lmer(PC2_avg ~ 1 + (1|FAM) + (1|POP), data = AvgPC)
+Mod6 <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|POP), data = AvgPC)
+Mod7 <- lmer(PC2_avg ~ 1 + (1|FAM) + (1|Treatment), data = AvgPC)
+
+lrtest(Mod0, ModFull) #p*t
+lrtest(Mod1, ModFull) #f*t
+lrtest(Mod2, Mod0) #p
+lrtest(Mod3, Mod0) #f
+lrtest(Mod5, Mod4) #t
+```
+
+
+```{r}
+MAM <- lmer(PC2_avg ~ 1 + (1|Treatment) + (1|POP) + (1|POP:Treatment), data = AvgPC)
+summary(MAM)
+
+# Extract variance components
+var_comp <- as.data.frame(VarCorr(MAM))
+random_effect_vars <- var_comp$vcov[1:3]
+residual_var <- attr(VarCorr(MAM), "sc")^2
+
+# Total variance
+total_var <- sum(random_effect_vars) + residual_var
+
+# Proportion of variance explained by each random effect
+prop_var_explained <- random_effect_vars / total_var
+names(prop_var_explained) <- var_comp$grp[1:3]  # Assign names to the proportions
+
+# Display the result
+prop_var_explained
+(total_var-residual_var)/total_var
+```
+
+# Figure 2
+
+```{r}
+AvgPCPop <- AvgPC %>% 
+  group_by(Treatment, LAT) %>% 
+  summarise(FT = mean(FT_GDD10, na.rm = TRUE),
+            FlwrVeg = mean(FlwrVeg, na.rm =TRUE),
+            PC1_avg = mean(PC1, na.rm = TRUE),
+            PC2_avg = mean(PC2, na.rm = TRUE),
+            PC1_skew = skewness(PC1, na.rm=TRUE),
+            PC2_skew = skewness(PC2, na.rm=TRUE),
+            PC1_var = var(PC1, na.rm=TRUE),
+            PC2_var = var(PC2, na.rm=TRUE),
+            Fit = mean(AbsFit, na.rm = TRUE),
+            Dam = mean(Dam, na.rm = TRUE)) #for plotting
+```
+
+```{r, echo = FALSE}
+AbsFitRxn <- ggplot(AvgPCPop, aes(x=Treatment, y=Fit, color=LAT)) + 
+  geom_point(size = 2.5) + 
+  geom_line(aes(group=LAT)) +
+  labs(x = "Treatment", y = "Total Fecundity (g)") + 
+  scale_color_viridis(option="magma",direction = -1) +
+  theme_pub() +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+       axis.title.y = element_text(size=14,angle=90, margin=margin(r=5)))
+
+FTRxn <- ggplot(AvgPCPop, aes(x=Treatment, y=FT, color=LAT)) + 
+  geom_point(size = 2.5) + 
+  geom_line(aes(group=LAT)) +
+  labs(x = "Treatment", y = "Flowering Time") + 
+  scale_color_viridis(option="magma",direction = -1) +
+  theme_pub() +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+        axis.title.y = element_text(size=14,angle=90, margin=margin(r=5)))
+
+FVegRxn <- ggplot(AvgPCPop, aes(x=Treatment, y=FlwrVeg, color=LAT)) + 
+  geom_point(size = 2.5) + 
+  geom_line(aes(group=LAT)) +
+  labs(x = "Treatment", y = "Size at Flowering (cm)") + 
+  scale_color_viridis(option="magma",direction = -1) +
+  theme_pub() +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+        axis.title.y = element_text(size=14,angle=90, margin=margin(r=5)))
+
+DmgRxn <- ggplot(AvgPCPop, aes(x=Treatment, y=Dam, color=LAT)) + 
+  geom_point(size = 2.5) + 
+  geom_line(aes(group=LAT)) +
+  labs(x = "Treatment", y = "Herbivore Damage") + 
+  scale_color_viridis(option="magma",direction = -1) +
+  theme_pub() +
+  theme(strip.background = element_rect(color = "white", fill = "white"),
+        axis.title.y = element_text(size=14,angle=90, margin=margin(r=5)))
+```
+
+```{r fig.cap = "Reaction norms of population mean values for total fecundity, flowering time, vegetative height at flowering (cm) and proportion of damaged stems of *Lythrum salicaria* plants. Half of the plants were sprayed with insecticide to test for the effects of insect herbivory. Total fecundity is measured as the sum of final reproductive biomass in grams for each individual plant to capture potential costs of reproducing (or not) in a given year. Twenty populations are colour coded by latitude of origin, ranging from dark colours in the north (48 \u00B0 N) to light colours in the south (38 \u00B0 N) grown in a common garden at the Queen's University Biological Station north of Kingston, ON.", echo = FALSE}
+pdf("./Figures/Fig2RxnNorms.pdf",width=6.5,height=6.5)
+plot_grid(AbsFitRxn, FTRxn, FVegRxn, DmgRxn)
+dev.off()
+```
+

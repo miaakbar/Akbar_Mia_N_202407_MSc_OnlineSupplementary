@@ -1,0 +1,528 @@
+---
+title: "Interannual Variation"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+This .rmd explores variation among years for the four traits of interest.
+
+# Setup 
+
+```{r load libraries, include = FALSE}
+library(viridis) 
+library(Hmisc)
+library(lme4)
+library(lmtest)
+library(lubridate)
+library(gridExtra)
+library(cowplot)
+library(tidyverse)
+```
+
+```{r load theme and manipulate data, include = FALSE}
+setwd("./")
+
+source("http://bit.ly/theme_pub")
+
+Dat <- read.csv("./Data/Combined/QUBSLythrumCG_GDD.csv")
+
+Dat <- Dat %>%
+  mutate(ExperimentalYears = ifelse(BLOCK %in% c("E1", "E2", "E7", "E8", "E11", "E12"), 1, 2), Region = case_when(LAT <= 41.57154 ~ "South", LAT <= 44.54749 ~ "Mid", TRUE ~ "North")) %>% 
+  mutate_at(vars(POP,FAM,BLOCK,Treatment,Year), as.factor)
+
+Dat <- Dat %>%
+  group_by(Ind) %>%
+  mutate(AbsFit = sum(Weight, na.rm = TRUE) / ExperimentalYears) %>%
+  ungroup()  
+Dat <- Dat %>% dplyr::select(-ExperimentalYears)
+
+Dat$FlowerBinary <- ifelse(is.na(Dat$FT), 0, 1)
+```
+
+```{r transform if necessary}
+hist(Dat$Weight)
+hist(Dat$PropDam)
+
+Dat$LogFit <- log(Dat$Weight+1)
+
+logit <- function(p, epsilon = 1e-10) {
+  p <- pmax(pmin(p, 1 - epsilon), epsilon)
+  log(p / (1 - p))
+}
+Dat$LogitDam <- sapply(Dat$PropDam, logit)
+
+hist(Dat$LogFit)
+hist(Dat$LogitDam) # if we analyze interannual variation for the MS, this needs to be run in a glm with a logit link
+```
+
+```{r calculate pop means, include=FALSE}
+Pop <- Dat %>% 
+  group_by(Treatment, Year, LAT, POP) %>% 
+  summarise(Weight = mean(Weight, na.rm=TRUE),
+            FT = mean(FT_GDD10, na.rm = TRUE),
+            FVeg = mean(FVeg, na.rm = TRUE),
+            FlwrVeg = mean(FlwrVeg, na.rm = TRUE),
+            FlowerBinary = mean(FlowerBinary, na.rm = TRUE))
+```
+
+```{r calculate fam means, include=FALSE}
+Fam <- Dat %>% 
+  group_by(Treatment, Year, LAT, FAM) %>% 
+  summarise(Weight = mean(Weight, na.rm=TRUE),
+            FT = mean(FT_GDD10, na.rm = TRUE),
+            FVeg = mean(FVeg, na.rm = TRUE),
+            FlwrVeg = mean(FlwrVeg, na.rm = TRUE),
+            FlowerBinary = mean(FlowerBinary, na.rm = TRUE))
+```
+
+# Is there a Treat x Year x Pop interaction?
+
+Yes
+```{r}
+Traits <- c("FT_GDD10", "FlwrVeg", "LogFit", "LogitDam")
+
+# make empty df for output
+ThreeWayResults <- data.frame(
+  Trait = character(),
+  Effect = character(),
+  Chi_Squared = numeric(),
+  p_value = numeric(),
+  Warnings = character(),
+  stringsAsFactors = FALSE
+)
+
+# function to fit models and record warnings
+fit_model <- function(formula, data) {
+  warnings <- NULL
+  result <- withCallingHandlers(
+    expr = lmer(formula, data = data),
+    warning = function(w) {
+      warnings <<- c(warnings, w$message)
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(model = result, warnings = warnings)
+}
+
+# function to fit LRT and record warnings
+perform_lrtest <- function(model1, model2) {
+  warnings <- NULL
+  result <- withCallingHandlers(
+    expr = lrtest(model1, model2),
+    warning = function(w) {
+      warnings <<- c(warnings, w$message)
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(test = result, warnings = warnings)
+}
+
+# Iterate through each trait
+  for (Trait in Traits) {
+    # create formulas
+    formula_full <- as.formula(paste(Trait, "~ (Treatment * POP * Year) + (Treatment|FAM)"))
+    formula_0 <- as.formula(paste(Trait, "~ (Treatment * POP * Year) + (1|FAM)"))
+    formula_1 <- as.formula(paste(Trait, "~ Treatment + Year + POP + Treatment:Year + Treatment:POP + (Treatment|FAM)"))
+    formula_2 <- as.formula(paste(Trait, "~ Treatment + Year + POP + Treatment:Year + Year:POP + (Treatment|FAM)"))
+    formula_3 <- as.formula(paste(Trait, "~ Treatment + Year + POP + Treatment:POP + Year:POP + (Treatment|FAM)"))
+    
+    
+    # fit the models
+    ModFull <- fit_model(formula_full, Dat)
+    Mod0 <- fit_model(formula_0, Dat)
+    Mod1 <- fit_model(formula_1, Dat)
+    Mod2 <- fit_model(formula_2, Dat)
+    Mod3 <- fit_model(formula_3, Dat)
+    
+    # define the tests
+    tests <- list(
+      "(Treatment|Family)" = list(mod1 = Mod0, mod2 = ModFull),
+      "Year * POP" = list(mod1 = Mod1, mod2 = Mod0),
+      "Treatment * POP" = list(mod1 = Mod2, mod2 = Mod1),
+      "Treatment * Year" = list(mod1 = Mod3, mod2 = Mod1)
+    )
+    
+    # perform the tests
+    for (effect in names(tests)) {
+      test_result <- perform_lrtest(tests[[effect]]$mod1$model, tests[[effect]]$mod2$model)
+      if (!is.null(test_result$test)) {
+        chi_sq <- test_result$test$Chisq[2]
+        p_value <- test_result$test$`Pr(>Chisq)`[2]
+        warnings <- c(ModFull$warnings, Mod0$warnings, Mod1$warnings, Mod2$warnings, Mod3$warnings, test_result$warnings)
+        warnings <- paste(unique(warnings), collapse = " | ")
+        
+        # append the results to the dataframe
+        ThreeWayResults <- rbind(ThreeWayResults, data.frame(
+          Trait = Trait,
+          Effect = effect,
+          Chi_Sq = chi_sq,
+          p_value = p_value,
+          Warnings = warnings,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+    
+    # Clean-up
+    rm(ModFull, Mod0, Mod1, Mod2, Mod3)
+  }
+```
+
+
+# Is there a TreatxPop or TreatxFam interaction for each trait? 
+
+## 2018-2020, 2022, 2023
+
+```{r}
+Traits <- c("FT_GDD10", "FlwrVeg", "LogFit", "LogitDam")
+Years <- c("2018", "2019", "2020", "2022", "2023")
+
+# make empty df
+TreatbyPopResults <- data.frame(
+  Year = integer(),
+  Trait = character(),
+  Effect = character(),
+  Chi_Squared = numeric(),
+  p_value = numeric(),
+  Warnings = character(),
+  stringsAsFactors = FALSE
+)
+
+# function to fit model and record warnings
+fit_model <- function(formula, data) {
+  warnings <- NULL
+  result <- withCallingHandlers(
+    expr = lmer(formula, data = data),
+    warning = function(w) {
+      warnings <<- c(warnings, w$message)
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(model = result, warnings = warnings)
+}
+
+# function to perform lrt and record warnings
+perform_lrtest <- function(model1, model2) {
+  warnings <- NULL
+  result <- withCallingHandlers(
+    expr = lrtest(model1, model2),
+    warning = function(w) {
+      warnings <<- c(warnings, w$message)
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(test = result, warnings = warnings)
+}
+
+# iterate through each year and trait
+for (Year in Years) {
+  for (Trait in Traits) {
+    # create formulas using paste
+    formula_full <- as.formula(paste(Trait, "~ (Treatment * POP) + (Treatment|FAM)"))
+    formula_0 <- as.formula(paste(Trait, "~ (Treatment * POP) + (1|FAM)"))
+    formula_1 <- as.formula(paste(Trait, "~ Treatment + POP + (1|FAM)"))
+    formula_2 <- as.formula(paste(Trait, "~ Treatment + (1|FAM)"))
+    formula_3 <- as.formula(paste(Trait, "~ POP + (1|FAM)"))
+    
+    formula_11 <- as.formula(paste(Trait, "~ Treatment + POP + (Treatment|FAM)"))
+    formula_22 <- as.formula(paste(Trait, "~ Treatment + (Treatment|FAM)"))
+    formula_33 <- as.formula(paste(Trait, "~ POP + (Treatment|FAM)"))
+    
+ 
+    subset_data <- Dat[Dat$Year == Year, ]
+    
+    # fit the models
+    ModFull <- fit_model(formula_full, subset_data)
+    Mod0 <- fit_model(formula_0, subset_data)
+    Mod1 <- fit_model(formula_1, subset_data)
+    Mod2 <- fit_model(formula_2, subset_data)
+    Mod3 <- fit_model(formula_3, subset_data)
+    
+    Mod11 <- fit_model(formula_11, subset_data)
+    Mod22 <- fit_model(formula_22, subset_data)
+    Mod33 <- fit_model(formula_33, subset_data)
+    
+    # define lrt
+    tests <- list(
+      "1 + (Treatment|Family)" = list(mod1 = Mod0, mod2 = ModFull),
+      "Treatment * POP" = list(mod1 = Mod1, mod2 = Mod0),
+      "POP effect" = list(mod1 = Mod2, mod2 = Mod1),
+      "Treatment effect" = list(mod1 = Mod3, mod2 = Mod1)
+    )
+    
+    # perform lrt
+    for (effect in names(tests)) {
+      test_result <- perform_lrtest(tests[[effect]]$mod1$model, tests[[effect]]$mod2$model)
+      if (!is.null(test_result$test)) {
+        chi_squared <- test_result$test$Chisq[2]
+        p_value <- test_result$test$`Pr(>Chisq)`[2]
+        warnings <- c(ModFull$warnings, Mod0$warnings, Mod1$warnings, Mod2$warnings, Mod3$warnings, test_result$warnings)
+        warnings <- paste(unique(warnings), collapse = " | ")
+        
+        # append results to the dataframe
+        TreatbyPopResults <- rbind(TreatbyPopResults, data.frame(
+          Year = Year,
+          Trait = Trait,
+          Effect = effect,
+          Chi_Squared = chi_squared,
+          p_value = p_value,
+          Warnings = warnings,
+          stringsAsFactors = FALSE
+        ))
+        
+        # if treat*fam is significant use that for other models instead of 1|fam
+        if (effect == "1 + (Treatment|Family)" && p_value < 0.05) {
+          additional_tests <- list(
+            "Treatment + POP + (Treatment|Family)" = list(mod1 = Mod11, mod2 = ModFull),
+            "Treatment + (Treatment|Family)" = list(mod1 = Mod22, mod2 = ModFull),
+            "POP + (Treatment|Family)" = list(mod1 = Mod33, mod2 = ModFull)
+          )
+          
+          for (add_effect in names(additional_tests)) {
+            add_test_result <- perform_lrtest(additional_tests[[add_effect]]$mod1$model, additional_tests[[add_effect]]$mod2$model)
+            if (!is.null(add_test_result$test)) {
+              chi_squared_add <- add_test_result$test$Chisq[2]
+              p_value_add <- add_test_result$test$`Pr(>Chisq)`[2]
+              warnings_add <- c(Mod11$warnings, Mod22$warnings, Mod33$warnings, add_test_result$warnings)
+              warnings_add <- paste(unique(warnings_add), collapse = " | ")
+              
+              # append additional results to df
+              TreatbyPopResults <- rbind(TreatbyPopResults, data.frame(
+                Year = Year,
+                Trait = Trait,
+                Effect = add_effect,
+                Chi_Squared = chi_squared_add,
+                p_value = p_value_add,
+                Warnings = warnings_add,
+                stringsAsFactors = FALSE
+              ))
+            }
+          }
+        }
+      }
+    }
+    
+    # clean-up
+    rm(ModFull, Mod0, Mod1, Mod2, Mod3, Mod11, Mod22, Mod33)
+  }
+}
+```
+
+## 2021
+
+Needs to be separate because of lack of damage survey in this year. I could definitely nest this in to the above but there is already too much going on up there and I am not that kind of coder.
+```{r}
+Traits <- c("FT_GDD10", "FlwrVeg", "LogFit")
+Year <- 2021
+
+# make empty df
+TreatbyPopResults2021 <- data.frame(
+  Year = integer(),
+  Trait = character(),
+  Effect = character(),
+  Chi_Squared = numeric(),
+  p_value = numeric(),
+  Warnings = character(),
+  stringsAsFactors = FALSE
+)
+
+# function to fit model and record warnings
+fit_model <- function(formula, data) {
+  warnings <- NULL
+  result <- withCallingHandlers(
+    expr = lmer(formula, data = data),
+    warning = function(w) {
+      warnings <<- c(warnings, w$message)
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(model = result, warnings = warnings)
+}
+
+# function to perform lrt and record warnings
+perform_lrtest <- function(model1, model2) {
+  warnings <- NULL
+  result <- withCallingHandlers(
+    expr = lrtest(model1, model2),
+    warning = function(w) {
+      warnings <<- c(warnings, w$message)
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(test = result, warnings = warnings)
+}
+
+for (Trait in Traits) {
+  # create formulas 
+  formula_full <- as.formula(paste(Trait, "~ (Treatment * POP) + (Treatment|FAM)"))
+  formula_0 <- as.formula(paste(Trait, "~ (Treatment * POP) + (1|FAM)"))
+  formula_1 <- as.formula(paste(Trait, "~ Treatment + POP + (1|FAM)"))
+  formula_2 <- as.formula(paste(Trait, "~ Treatment + (1|FAM)"))
+  formula_3 <- as.formula(paste(Trait, "~ POP + (1|FAM)"))
+  
+  formula_11 <- as.formula(paste(Trait, "~ Treatment + POP + (Treatment|FAM)"))
+  formula_22 <- as.formula(paste(Trait, "~ Treatment + (Treatment|FAM)"))
+  formula_33 <- as.formula(paste(Trait, "~ POP + (Treatment|FAM)"))
+  
+
+  subset_data <- Dat[Dat$Year == Year, ]
+  
+  # fit models
+  ModFull <- fit_model(formula_full, subset_data)
+  Mod0 <- fit_model(formula_0, subset_data)
+  
+  Mod11 <- fit_model(formula_11, subset_data)
+  Mod22 <- fit_model(formula_22, subset_data)
+  Mod33 <- fit_model(formula_33, subset_data)
+  
+  # defines lrt
+  tests <- list(
+    "1 + (Treatment|Family)" = list(mod1 = Mod0, mod2 = ModFull)
+  )
+  
+  # perform lrt
+  for (effect in names(tests)) {
+    test_result <- perform_lrtest(tests[[effect]]$mod1$model, tests[[effect]]$mod2$model)
+    if (!is.null(test_result$test)) {
+      chi_squared <- test_result$test$Chisq[2]
+      p_value <- test_result$test$`Pr(>Chisq)`[2]
+      warnings <- c(ModFull$warnings, Mod0$warnings, test_result$warnings)
+      warnings <- paste(unique(warnings), collapse = " | ")
+      
+      # Append the results to the dataframe
+      TreatbyPopResults2021 <- rbind(TreatbyPopResults2021, data.frame(
+        Year = Year,
+        Trait = Trait,
+        Effect = effect,
+        Chi_Squared = chi_squared,
+        p_value = p_value,
+        Warnings = warnings,
+        stringsAsFactors = FALSE
+      ))
+      
+      # include treat*fam if it is significant
+      if (p_value < 0.05) {
+        additional_tests <- list(
+          "Treatment + POP + (Treatment|Family)" = list(mod1 = Mod11, mod2 = ModFull),
+          "Treatment + (Treatment|Family)" = list(mod1 = Mod22, mod2 = ModFull),
+          "POP + (Treatment|Family)" = list(mod1 = Mod33, mod2 = ModFull)
+        )
+        
+        for (add_effect in names(additional_tests)) {
+          add_test_result <- perform_lrtest(additional_tests[[add_effect]]$mod1$model, additional_tests[[add_effect]]$mod2$model)
+          if (!is.null(add_test_result$test)) {
+            chi_squared_add <- add_test_result$test$Chisq[2]
+            p_value_add <- add_test_result$test$`Pr(>Chisq)`[2]
+            warnings_add <- c(Mod11$warnings, Mod22$warnings, Mod33$warnings, add_test_result$warnings)
+            warnings_add <- paste(unique(warnings_add), collapse = " | ")
+            
+            # append the additional results to the df
+            TreatbyPopResults2021 <- rbind(TreatbyPopResults2021, data.frame(
+              Year = Year,
+              Trait = Trait,
+              Effect = add_effect,
+              Chi_Squared = chi_squared_add,
+              p_value = p_value_add,
+              Warnings = warnings_add,
+              stringsAsFactors = FALSE
+            ))
+          }
+        }
+      }
+    }
+  }
+  
+  # clean-up
+  rm(ModFull, Mod0, Mod11, Mod22, Mod33)
+}
+```
+
+# Interannual correlations for FVeg and FT
+
+## Population
+
+```{r FT and size dataframe for pop correlations, include = FALSE}
+PopFTVegWide <- Pop %>% 
+  dplyr::select(Treatment, Year, LAT, FT, FlwrVeg) %>% 
+  filter(!is.na(FT)) %>% 
+  pivot_wider(id_cols = c("LAT"), 
+              names_from = c("Year","Treatment"),
+              values_from = c("FT","FlwrVeg"),
+              names_sep = "_") 
+#filtering away one NA
+```
+
+```{r}
+Traits <- c("FT","FlwrVeg")
+Treatments <- c("Sprayed","Unsprayed")
+for (trait in unique(Traits)) {
+  for (treatment in Treatments) {
+    trait_treatment_columns <- grep(paste0(trait, "_\\d\\d\\d\\d_", treatment), names(PopFTVegWide), value = TRUE)
+    subset_df <- PopFTVegWide[, c(trait_treatment_columns,"LAT")]
+    correlation_matrix <- rcorr(as.matrix(subset_df))
+    print("--------------")
+    print(paste(trait, treatment, sep = "_"))
+    print(correlation_matrix)
+    print("--------------")
+  }
+}
+
+```
+
+## Seed family 
+
+```{r FT and size dataframe for correlations, include = FALSE}
+FamFTVegWide <- Fam %>% 
+  dplyr::select(Treatment, Year, LAT, FAM, FT, FlwrVeg) %>% 
+  pivot_wider(id_cols = c("LAT","FAM"), 
+              names_from = c("Year","Treatment"),
+              values_from = c("FT","FlwrVeg"),
+              names_sep = "_") 
+
+```
+
+```{r, echo = FALSE}
+Traits <- c("FT","FlwrVeg")
+for (trait in unique(Traits)) {
+  for (treatment in Treatments) {
+    trait_treatment_columns <- grep(paste0(trait, "_\\d\\d\\d\\d_", treatment), names(FamFTVegWide), value = TRUE)
+    subset_df <- FamFTVegWide[, c(trait_treatment_columns)]
+    correlation_matrix <- rcorr(as.matrix(subset_df))
+    print("--------------")
+    print(paste(trait, treatment, sep = "_"))
+    print(correlation_matrix)
+    print("--------------")
+  }
+}
+```
+
+## Residual correlations calculated on deviations of each family mean from its population mean
+
+```{r, include = FALSE}
+FAM <- FamFTVegWide %>% dplyr::select(LAT,FAM)
+PopMeansFam <- left_join(FAM,PopFTVegWide, by="LAT") 
+
+Deviations <- FamFTVegWide
+for (col in colnames(FamFTVegWide)) {
+  if (!(col %in% c("LAT", "FAM"))) {
+  Deviations[[col]] <- FamFTVegWide[[col]] - PopMeansFam[[col]]
+  }
+}
+```
+
+```{r}
+Traits <- c("FT","FlwrVeg")
+for (trait in unique(Traits)) {
+  for (treatment in Treatments) {
+    trait_treatment_columns <- grep(paste0(trait, "_\\d\\d\\d\\d_", treatment), names(Deviations), value = TRUE)
+    subset_df <- Deviations[, c(trait_treatment_columns)]
+    correlation_matrix <- cor(subset_df, use = "complete.obs")
+    print("--------------")
+    print(paste(trait, treatment, sep = "_"))
+    print(correlation_matrix)
+    print("--------------")
+  }
+}
+```
+
