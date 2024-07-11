@@ -27,6 +27,7 @@ theme_custom<-function(base_size = 24, base_family = ""){
 }
 
 setwd("./")
+ifelse(!dir.exists(file.path("./", "Figures")), dir.create(file.path("./", "Figures")), FALSE
 ```
 
 # Prepare data
