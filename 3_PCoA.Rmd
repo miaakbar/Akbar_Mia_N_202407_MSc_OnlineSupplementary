@@ -173,7 +173,9 @@ This changes our estimate of variation on the first few axes to 23.5%, 11.5%, 6.
 
 # Plotting 
 
+```{r create_subdirectory}
 ifelse(!dir.exists(file.path("./", "Figures")), dir.create(file.path("./", "Figures")), FALSE)
+```
 
 ## Bivariate PCoA1 & PCoA2
 
