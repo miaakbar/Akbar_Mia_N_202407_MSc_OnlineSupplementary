@@ -1,0 +1,143 @@
+---
+title: "Testing for latitudinal clines using linear models"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+
+```{r setup}
+library(tidyr)
+library(dplyr)
+library(lme4)
+library(lmtest)
+library(MuMIn)
+```
+
+# Prepare data
+
+```{r bootgraph_data}
+BootOut<-read.csv("./Data/BootOut.csv",header=T)
+
+BootMeans<-select(BootOut,Lat,Stat,Mean=mMean,Aggregate=agMean) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="BootMean")
+BootLow<-select(BootOut,Lat,Stat,Mean=mCIlow,Aggregate=agCIlow) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="CI_low")
+BootUp<-select(BootOut,Lat,Stat,Mean=mCIup,Aggregate=agCIup) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="CI_up")
+
+GraphDat<-full_join(BootMeans,BootLow,by=c("Lat","Stat","Calc_Type")) %>%
+  full_join(BootUp,by=c("Lat","Stat","Calc_Type"))
+
+AvgBootMeans <- BootMeans %>% filter(Calc_Type == "Mean")
+AgBootMeans <- BootMeans %>% filter(Calc_Type == "Aggregate")
+```
+
+```{r}
+Emergent <- read.csv("./Data/Emergent.csv",header=T) %>% filter(Stat != "CV")
+Emergent$Stat<-factor(Emergent$Stat, 
+                     levels=c("Start","End","Duration","Mean",
+                              "Var", "Skew","Kurtosis"))
+```
+
+# Study Questions
+
+## Which population average phenology traits form clines?
+
+```{r}
+for (trait in unique(AvgBootMeans$Stat)){
+  subset_data <- AvgBootMeans[AvgBootMeans$Stat == trait, ]
+  Mod <- lm(BootMean ~ Lat, data = subset_data)
+  bootmean_sd <- sd(subset_data$BootMean)
+  print("--------------")
+  print(trait)
+  print(summary(Mod))
+  print(coef(Mod)[2] * sd(subset_data$Lat) / bootmean_sd) #standardized slope
+  print("--------------")
+}
+```
+
+### Is a quadratic model more suitable for any traits? 
+
+```{r}
+for (trait in unique(AvgBootMeans$Stat)){
+  Mod0 <- lm(BootMean ~ Lat, data = AvgBootMeans[AvgBootMeans$Stat == trait , ])
+  Mod1 <- lm(BootMean ~ Lat + I(Lat^2), data = AvgBootMeans[AvgBootMeans$Stat == trait , ])
+  print("--------------")
+  print(trait)
+  print(lrtest(Mod0,Mod1))
+  print(AICc(Mod0))
+  print(AICc(Mod1))
+  print("--------------")
+  
+  Mod0<-Mod1<-NA # Clean-up
+}
+```
+
+
+## Which population aggregate phenology traits form clines?
+
+```{r}
+for (trait in unique(AgBootMeans$Stat)){
+  subset_data <- AgBootMeans[AgBootMeans$Stat == trait, ]
+  Mod <- lm(BootMean ~ Lat, data = subset_data)
+  bootmean_sd <- sd(subset_data$BootMean)
+  print("--------------")
+  print(trait)
+  print(summary(Mod))
+  print(coef(Mod)[2] * sd(subset_data$Lat) / bootmean_sd) #standardized slope
+  print("--------------")
+}
+```
+
+### Is a quadratic model more suitable for any traits? 
+
+```{r}
+for (trait in unique(AgBootMeans$Stat)){
+  Mod0 <- lm(BootMean ~ Lat, data = AgBootMeans[AgBootMeans$Stat == trait , ])
+  Mod1 <- lm(BootMean ~ Lat + I(Lat^2), data = AgBootMeans[AgBootMeans$Stat == trait , ])
+  print("--------------")
+  print(trait)
+  print(lrtest(Mod0,Mod1))
+  print(AICc(Mod0))
+  print(AICc(Mod1))
+  print("--------------")
+  
+  Mod0<-Mod1<-NA # Clean-up
+}
+```
+
+## Which emergent properties form clines?
+
+```{r}
+for (trait in unique(Emergent$Stat)){
+  subset_data <- Emergent[Emergent$Stat == trait, ]
+  Mod <- lm(EmScore ~ Lat, data = subset_data)
+  emscore_sd <- sd(subset_data$EmScore)
+  print("--------------")
+  print(trait)
+  print(summary(Mod))
+  print(coef(Mod)[2] * sd(subset_data$Lat) / emscore_sd)
+  print("--------------")
+}
+```
+
+### Is a quadratic model more suitable for any traits? 
+
+```{r}
+for (trait in unique(Emergent$Stat)){
+  Mod0 <- lm(EmScore ~ Lat, data = Emergent[Emergent$Stat == trait , ])
+  Mod1 <- lm(EmScore ~ Lat + I(Lat^2), data = Emergent[Emergent$Stat == trait , ])
+  print("--------------")
+  print(trait)
+  print(lrtest(Mod0,Mod1))
+  print(AICc(Mod0))
+  print(AICc(Mod1))
+  print("--------------")
+  
+  Mod0<-Mod1<-NA # Clean-up
+}
+```
+
+
+

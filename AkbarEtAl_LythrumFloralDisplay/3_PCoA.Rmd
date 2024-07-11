@@ -1,0 +1,279 @@
+---
+title: "PCoA"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+The following analysis (and related notes) were informed by Austen et al., (2014) and their detailed code.
+
+```{r setup}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+theme_custom<-function(base_size = 24, base_family = ""){
+  theme_bw(base_size = base_size, base_family = base_family) %+replace% 
+    theme(axis.text = element_text(size = rel(0.8),colour="black"),
+          axis.ticks = element_line(colour = "black"), 
+          legend.position = "none",
+          panel.border = element_rect(fill = NA, colour = NA), 
+          panel.grid.major = element_line(colour = NA,size = 0), 
+          panel.grid.minor = element_line(colour = NA,size = 0), 
+          axis.line = element_line(colour ="black")
+    )
+}
+
+setwd("./")
+ifelse((!dir.exists(file.path("./", "Figures"))), (dir.create(file.path("./", "Figures"))), FALSE)
+```
+
+# Prepare data
+
+Relative floral display data, seed family/population information and additional traits 
+
+```{r raw_data}
+Data <- read.csv("./Data/LythrumDisplay2008.csv")
+names(Data)[grep("Num",names(Data))]<-"Ind"
+str(Data)
+
+# Veg: Final vegetative height
+# PC1: Position on axis characterizing FTS trade-off
+# HinfW: Inflorescence biomass at harvest
+```
+
+Remove problematic individuals 
+
+```{r cancelled_guys}
+Data <- Data %>% 
+  filter(TotFlwr > 10) %>% 
+  # Display too small to meaningfully characterize schedule shape
+  filter(Ind != 187 & Ind != 440) 
+# Start day not recorded 
+```
+
+Long format of floral display data
+
+```{r display_long}
+Disp <- Data %>% 
+  pivot_longer(d0:d60, 
+               names_to = "RelDay", 
+               values_to = "OpFlwr") %>% 
+  mutate(RelDay = as.numeric(gsub("d","",RelDay)),
+         AbsDay = RelDay + Start) %>% 
+  select(Ind, Fam, Pop, Lat, AbsDay, OpFlwr)
+```
+
+Plant family and population information
+
+```{r pop_info}
+PopInfo <- Data %>% 
+  select(Ind, Fam, Pop, Lat)
+PopInfo <- PopInfo %>% mutate(RowNum= row_number()) # for combining w PCoA axes later
+```
+
+Convert Disp to wide form in order to make a K-S matrix 
+
+```{r wide_disp}
+WideDat <- pivot_wider(Disp, id_cols= Ind, names_from = AbsDay, values_from = OpFlwr)
+WideDat <- WideDat[, order(as.numeric(colnames(WideDat)))]
+Dat <- left_join(WideDat, PopInfo, by="Ind")
+Dat <- Dat %>% dplyr::select(Ind, Fam, Pop, Lat, everything())
+Dat[is.na(Dat)] <- 0
+```
+
+```{r matrix_prep}
+no_plants<-369	#number of plants (rows)
+first_flcol<-5	#first column containing flower count observations
+last_flcol<-119	#last column containing flower count observations
+first_flday<-8	#first day of flowering
+#If column of plant ids is not already behaving as a character, tell it to do so
+Dat[,1]<-as.character(Dat[,1])
+```
+
+# Part II: KS Distances 
+
+Create no_plants vectors (one per plant), each of length = total number of flowers produced by that plant. 
+
+```{r generating_dayvector}
+#We will first require a vector reporting the days on which flowers were counted. 
+days<-as.numeric(names(Dat))[first_flcol:last_flcol]
+#We need a parallel vector reporting the columns that correspond to each day
+columns<-c(first_flcol:last_flcol)
+
+#Run loops to create the vectors, saving each as an element in a list (named "flowerlist")  
+flowerlist<-vector(mode="list", length=no_plants)
+
+for (n in 1:no_plants) {
+for (p in 1:length(days))	 {
+
+vect<-if (days[p]==first_flday){
+	rep(x=days[p], times=Dat[n,columns[p]])} else {
+	c(vect, rep(x=days[p], times=Dat[n,columns[p]]))}
+	
+	}	#end loop over days of flower counts
+	
+	flowerlist[[n]]<-c(vect)
+	}	#end loop over plants
+```
+
+
+```{r computing_ksdistance}
+#Kolmogorov-Smirnov distance matrix
+#The pairwise k-s distance measured in R is sensitive to differences in locations. Therefore, to calculate k-s distances, we want to standardize each individual's flowering duration to run from 0 (first day flowering) to 1 (last day flowering).  This removes differences in duration, onset, and end from our comparison of schedule shape. 
+
+list.std<-vector(mode="list", length=no_plants)
+for (n in 1:no_plants) {
+	list.std[[n]]<-((flowerlist[[n]]-min(flowerlist[[n]]))/(max(flowerlist[[n]])-min(flowerlist[[n]])))
+	}
+```
+
+```{r build_matrix}
+#Build the K-S distance matrix, indexing through each pair ij of plants.
+ks<-matrix(nrow=no_plants, ncol=no_plants)
+
+for (i in 1:no_plants) {
+
+for (j in 1:no_plants)	{
+	
+	ks.ij<-ks.test(list.std[[i]], list.std[[j]])
+	ks[i,j]<-ks.ij$statistic
+	
+	}}
+```
+
+# PART III: PCoA (constrainted ordination)   
+
+```{r load_ks, warning=FALSE, message=FALSE}
+ks <- read.csv("./Data/KSMatrix.csv") #only necessary if you did not just compute the matrix 
+ks_pcoa<-cmdscale(d=ks, k=10, eig=TRUE, add=FALSE, x.ret=TRUE)	
+```
+
+```{r pcoa_eig}
+ks_pcoa$eig
+ks_pcoa$eig/sum(ks_pcoa$eig)
+```
+
+Here, the first four axes capture 41%, 20%, 12% and 9.8% of variation, respectively. NOTE- however, that these values are probably inflated by negative eigenvalues of later axes
+
+K-S distances are non-metric.  How much variation ends up on negative axes (i.e., how much variation cannot be captured in Euclidean space)
+
+```{r pcoa_var_all}
+sum(ks_pcoa$eig[which(ks_pcoa$eig<0)])/sum(ks_pcoa$eig[which(ks_pcoa$eig>0)])
+```
+
+The total magnitude of variation on negative axes is 43% of that on positive axes. This is certainly inflating our above estimate of variation on the first few axes.
+
+We can adjust our estimates of proportion variation explained by first axes by including only positive eigenvalues in the denominator
+
+```{r pcoa_var_pos}
+ks_pcoa$eig[1:5]/sum(ks_pcoa$eig[which(ks_pcoa$eig>0)])
+```
+
+This changes our estimate of variation on the first few axes to 23.5%, 11.5%, 6.9%, etc.
+
+# Plotting 
+
+## Bivariate PCoA1 & PCoA2
+
+```{r join_popinfo}
+PlotPcoa <- as.data.frame(ks_pcoa$points)
+PlotPcoa <- PlotPcoa %>% mutate(RowNum = row_number())
+PlotPcoa <- left_join(PlotPcoa, PopInfo, by = "RowNum")
+```
+
+```{r scatterplot}
+pcoa <- ggplot(data = PlotPcoa, aes(x=V1, y=V2, colour=Lat)) + 
+  geom_point(size=3, alpha=0.7) + 
+  theme_custom() + 
+  xlab("PCoA1 (23.5%)") + 
+  ylab("PCoA2(11.6%)") + 
+  scale_color_viridis(option="magma",direction = -1) + 
+  ylim(-0.45,0.45) + 
+  xlim(-0.45,0.45)
+```
+
+```{r export}
+pdf("./Figures/PCoA/PCoA1xPCoA2.pdf",width=10,height=6)
+pcoa
+dev.off()
+```
+
+## Histograms of representative individuals
+
+### Bottom left
+
+```{r hist_bl}
+BL <- Disp %>% filter(Num=="27") %>% 
+  ggplot(aes(x=AbsDay, y=OpFlwr/TotFlwr)) + geom_col() + 
+  theme_classic() + 
+  theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()) 
+pdf("./Figures/PCoA/Ind27Hist.pdf",width=10,height=6)
+BL
+dev.off()
+```
+
+
+### Top left
+
+```{r hist_tl}
+TL <- Flwr %>% filter(Num=="285") %>% 
+  ggplot(aes(x=AbsDay, y=OpFlwr/TotFlwr)) + geom_col() + 
+  theme_classic() + 
+  theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()) 
+pdf("./Figures/PCoA/Ind285Hist.pdf",width=10,height=6)
+TL
+dev.off()
+```
+
+### Top right 
+
+```{r hist_tr}
+TR <- Flwr %>% filter(Num=="83") %>% 
+  ggplot(aes(x=AbsDay, y=OpFlwr/TotFlwr)) + geom_col() + 
+  theme_classic() + 
+  theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()) 
+pdf("./Figures/PCoA/Ind83Hist.pdf",width=10,height=6)
+TR
+dev.off()
+```
+
+### Bottom right 
+
+```{r hist_br}
+BR <- Flwr %>% filter(Num=="319") %>% ggplot(aes(x=AbsDay, y=OpFlwr/TotFlwr)) + geom_col() + theme_classic() + theme(axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()) 
+pdf("./Figures/PCoA/Ind319Hist.pdf",width=10,height=6)
+BR
+dev.off()
+```
+
+# Export PCoA Axes
+
+```{r export_axes}
+PCoAAxes<- PlotPcoa %>% dplyr::select(Pop,Lat, Num, V1, V2, V3, V4) %>% 
+  rename(PCoA1 = V1,
+         PCoA2 = V2,
+         PCoA3 = V3,
+         PCoA4 = V4) 
+write.csv(PCoAAxes,"./Data/PCoAAxes.csv", row.names=F) 
+```
