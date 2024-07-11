@@ -1,0 +1,229 @@
+---
+title: "Bootstrapped Moments"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r setup}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+source("http://bit.ly/theme_pub")
+theme_set(theme_pub()) 
+setwd("./")
+```
+
+# Load data
+
+Floral display data for all individuals
+
+```{r}
+Disp <- read.csv("./Data/Disp.csv")
+```
+
+
+Central moments of individual and aggregated population flowering schedules 
+
+```{r moments}
+Moments <- read.csv("./Data/Moments.csv")
+AgMoments <- read.csv("./Data/AgMoments.csv")
+```
+
+Plant seed family and population information
+
+```{r popinfo}
+Pops <- read.csv("./Data/PopInfo.csv")
+```
+
+# Key Functions
+
+Basic statistics:
+
+First day that at least one flower is observed
+
+```{r start_function}
+startFlwr<-function(Days=NA, NF=NA){return(
+  min(Days[NF>0],na.rm=T)
+)}
+```
+
+Last day that at least one flower is observed
+
+```{r end_function}
+endFlwr<-function(Days=NA, NF=NA){return(
+  max(Days[NF>0],na.rm=T)
+)}
+```
+
+Duration of flowering
+
+```{r duration_function}
+FlwrDuration<-function(Days=NA, NF=NA){return(
+  endFlwr(Days,NF)-startFlwr(Days,NF)
+)}
+```
+
+
+Given a vector NF of flower numbers by day:
+
+1. Vector of proportion of flowers
+
+```{r Flwr}
+pFlwr<-function(NF=NA){return(
+  NF/sum(NF, na.rm=T)
+  )}
+```
+
+2. Vector of days weighted by the proportion of flowers on each day
+
+```{r WeightDay}
+WeightDay<-function(Days=NA, NF=NA){return(
+  Days*pFlwr(NF)
+  )}
+```
+
+3. Weighted mean flowering day
+
+```{r MeanDay}
+MeanDay<-function(Days=NA, NF=NA){return(
+  sum(WeightDay(Days,NF),na.rm=T)
+)}
+```
+
+4. Weighted variance
+
+```{r Var}
+VarDay<-function(Days=NA, NF=NA){return(
+  sum((Days-MeanDay(Days,NF))^2*pFlwr(NF),na.rm=T)
+)}
+```
+
+5. Coefficient of variance
+
+```{r CV}
+CoefVarDay<-function(Days=NA, NF=NA){return(
+  VarDay(Days,NF)/MeanDay(Days,NF)
+)}
+```
+
+6. Coefficient of skewness
+
+```{r Cskew}
+CoefSkewDay<-function(Days=NA, NF=NA){return(
+  sum((Days-MeanDay(Days,NF))^3*pFlwr(NF),na.rm=T)/
+    sqrt(VarDay(Days,NF))^3
+)}
+```
+
+7. Coefficient of excess kurtosis
+
+```{r Ckurt}
+CoefKurtDay<-function(Days=NA, NF=NA){return(
+  sum((Days-MeanDay(Days,NF))^4*pFlwr(NF),na.rm=T)/
+    sqrt(VarDay(Days,NF))^4 - 3
+)}
+```
+
+# Boostrap models
+
+(not evaluated, must be run separately)
+
+```{r, eval=F}
+Iters<-999 # Number of bootstrap iterations
+# Raw Data
+IndStats<-left_join(Moments,Pops,by="Ind") %>% select(!c(Ind,Fam,Pop))
+PopDat<-Disp
+PopLats<-unique(PopDat$Lat)
+
+
+# Bootstrap output data frame
+Nrows<-length(PopLats)*ncol(PopDat[,-9])
+MeanBootOut<-as.data.frame(matrix(nrow=Nrows,ncol=5))
+AgBootOut<-MeanBootOut
+names(MeanBootOut)<-c("Lat","Stat","mMean","mCIlow","mCIup")
+names(AgBootOut)<-c("Lat","Stat","agMean","agCIlow","agCIup")
+
+
+MeanBootCalc<-function(x=NA){
+  Ind<-sample(1:nrow(x),replace=T)
+  return(colMeans(x[Ind,]))
+}
+
+# Calculations for aggregate stats for EACH bootstrap iteration
+AgBootCalc<-function(x=NA){
+  Ind<-sample(unique(x$Ind),replace=T)
+  Days<-x[x$Ind %in% Ind,"AbsDay"]
+  NF<-x[x$Ind %in% Ind,"OpFlwr"]
+  return(c(startFlwr(Days,NF),endFlwr(Days,NF),
+                  FlwrDuration(Days,NF),
+                  MeanDay(Days,NF),
+                  VarDay(Days,NF),CoefVarDay(Days,NF),
+                  CoefSkewDay(Days,NF),CoefKurtDay(Days,NF))
+         )
+}
+                 
+# Bootstrap calculations
+Row<-1
+for(p in 1:length(PopLats)){
+  # Aggregate stats
+  AgBootDat<-sapply(
+    as.data.frame(
+      matrix(
+        replicate(Iters,AgBootCalc(PopDat[PopDat$Lat==PopLats[p],])),
+        ncol=8,byrow=T)),
+    FUN=sort)
+  AgBootOut[c(0:7)+Row,]<-data.frame(Lat=rep(PopLats[p],8),
+                      Stat=c("Start","End","Duration",
+               "Mean","Var","CV",
+               "Skew","Kurtosis"),
+                      Mean=colMeans(AgBootDat),
+                      CIlow=AgBootDat[floor(Iters*0.025),],
+                      CIhigh=AgBootDat[ceiling(Iters*0.975),])
+  # Pop Mean Stats
+  MeanBootDat<-sapply(
+    as.data.frame(
+      matrix(
+        replicate(Iters,MeanBootCalc(IndStats[IndStats$Lat==PopLats[p],-9])),
+        ncol=8,byrow=T)),
+      FUN=sort)
+  MeanBootOut[c(0:7)+Row,]<-data.frame(Lat=rep(PopLats[p],8),
+                Stat=names(IndStats)[-9],
+                Mean=colMeans(MeanBootDat),
+                CIlow=MeanBootDat[floor(Iters*0.025),],
+                CIhigh=MeanBootDat[ceiling(Iters*0.975),])
+    
+
+  Row<-Row+8
+}
+
+BootOut<-full_join(MeanBootOut,AgBootOut,by=c("Lat","Stat"))
+
+write.csv(BootOut,"./Data/BootOut.csv",row.names=F)
+```
+
+
+```{r bootgraph_data}
+
+BootMeans<-select(BootOut,Lat,Stat,Mean=mMean,Aggregate=agMean) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="BootMean")
+BootLow<-select(BootOut,Lat,Stat,Mean=mCIlow,Aggregate=agCIlow) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="CI_low")
+BootUp<-select(BootOut,Lat,Stat,Mean=mCIup,Aggregate=agCIup) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="CI_up")
+
+GraphDat<-full_join(BootMeans,BootLow,by=c("Lat","Stat","Calc_Type")) %>%
+  full_join(BootUp,by=c("Lat","Stat","Calc_Type"))
+```
+
+```{r bootgraph_vis, fig.height=8,fig.width=6}
+ggplot(aes(x=Lat,y=BootMean),data=GraphDat) +
+  geom_errorbar(aes(ymin=CI_low,ymax=CI_up),colour="#F18F01") + 
+  geom_point(alpha=0.7,colour="#048BA8") + 
+  facet_grid(Stat~Calc_Type,scales="free") + 
+  geom_smooth(method="lm",formula = y ~ x + I(x^2),se=F,colour="#99C24D")
+```
+
+
+

@@ -1,0 +1,166 @@
+---
+title: "Visualizing Latitudinal Clines"
+author: "Mia Akbar"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+
+```{r setup}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+theme_custom<-function(base_size = 24, base_family = ""){
+  theme_bw(base_size = base_size, base_family = base_family) %+replace% 
+    theme(axis.text = element_text(size = rel(0.8),colour="black"),
+          axis.ticks = element_line(colour = "black"), 
+          legend.position = "none",
+          panel.border = element_rect(fill = NA, colour = NA), 
+          panel.grid.major = element_line(colour = NA,size = 0), 
+          panel.grid.minor = element_line(colour = NA,size = 0), 
+          axis.line = element_line(colour ="black")
+    )
+}
+
+setwd("./")
+```
+
+# Load data
+
+Bootstrapped means
+
+```{r bootgraph_data}
+BootOut<-read.csv("./Data/BootOut.csv",header=T)
+```
+
+Manipulate for plotting
+
+```{r bootgraph_data}
+BootMeans<-select(BootOut,Lat,Stat,Mean=mMean,Aggregate=agMean) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="BootMean")
+BootLow<-select(BootOut,Lat,Stat,Mean=mCIlow,Aggregate=agCIlow) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="CI_low")
+BootUp<-select(BootOut,Lat,Stat,Mean=mCIup,Aggregate=agCIup) %>%
+  pivot_longer(cols=Mean:Aggregate,names_to="Calc_Type",values_to="CI_up")
+
+GraphDat<-full_join(BootMeans,BootLow,by=c("Lat","Stat","Calc_Type")) %>%
+  full_join(BootUp,by=c("Lat","Stat","Calc_Type"))
+```
+
+
+# Initial visualizations
+
+```{r bootgraph_vis, fig.height=8,fig.width=6}
+ggplot(aes(x=Lat,y=BootMean),data=GraphDat) +
+  geom_errorbar(aes(ymin=CI_low,ymax=CI_up),colour="#F18F01") + 
+  geom_point(alpha=0.7,colour="#048BA8") + 
+  facet_grid(Stat~Calc_Type,scales="free") + 
+  geom_smooth(method="lm",formula = y ~ x + I(x^2),se=F,colour="#99C24D") 
+```
+
+# Manuscript figures
+
+## Clines in schedule traits
+
+```{r plot_clines}
+# Iterate over each Stat and Calc_Type
+for (stat_value in unique(GraphDat$Stat)) {
+  for (calc_type_value in unique(GraphDat$Calc_Type)) {
+    subset_data <- GraphDat[GraphDat$Stat == stat_value & GraphDat$Calc_Type == calc_type_value, ]
+    
+    # Create the plot for each combination
+    p <- ggplot(subset_data, aes(x = Lat, y = BootMean)) +
+      geom_errorbar(aes(ymin = CI_low, ymax = CI_up), colour = "black") + 
+      theme_custom() + 
+      geom_point(size = 3) +
+      theme(axis.title.x = element_blank())
+    
+    # Add regression lines based on statistical significance calculated in `Linear Models.rmd`
+      if (stat_value != "Var") {
+       p <- p + geom_smooth(method = "lm", formula = y ~ x, se = FALSE, colour = "red")
+      } 
+    
+    # Manipulate axis titles for easier combination into composite figure in a word processor 
+      if (calc_type_value == "Mean") {
+       p <- p + ylab(paste(stat_value))
+       } else { 
+         p <- p + theme(axis.title.y = element_blank())
+       } 
+    
+    # Export
+    pdf(file.path("./Figures/LatitudinalClines", paste(stat_value, "_", calc_type_value, ".pdf", sep = "")), width = 10, height = 6)
+    print(p)
+    dev.off()
+  }
+}
+```
+
+Making the average duration one separately
+
+```{r plot_avgduration}
+Plot_Duration_Mean <- GraphDat %>% 
+  filter(Calc_Type == "Mean") %>% 
+  filter(Stat=="Duration") %>% 
+  ggplot(aes(x = Lat, y = BootMean)) +
+      geom_errorbar(aes(ymin = CI_low, ymax = CI_up), colour = "black") + 
+      theme_custom() + 
+  ylab("Duration") +
+  theme(axis.title.x = element_blank()) +
+      geom_point(size = 3)
+
+pdf("./Figures/LatitudinalClines/Duration_Mean.pdf",width=10,height=6)
+Plot_Duration_Mean
+dev.off()
+```
+
+Making the aggregate skew one separately 
+
+```{r plot_agskew}
+Plot_Skew_Aggregate <- GraphDat %>% 
+  filter(Calc_Type == "Aggregate") %>% 
+  filter(Stat=="Skew") %>% 
+  ggplot(aes(x = Lat, y = BootMean)) +
+      geom_errorbar(aes(ymin = CI_low, ymax = CI_up), colour = "black") + 
+      theme_custom() + 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+      geom_point(size = 3)
+
+Plot_Skew_Aggregate
+
+pdf("./Figures/LatitudinalClines/Skew_Aggregate.pdf",width=10,height=6)
+Plot_Skew_Aggregate
+dev.off()
+```
+
+## Emergent Properties
+
+```{r plot_emergent}
+for (stat_value in unique(Emergent$Stat)) {
+  subset_data <- Emergent[Emergent$Stat == stat_value, ]
+  
+  # Create the plot
+  p <- ggplot(subset_data, aes(x = Lat, y = EmScore)) +
+    theme_custom() +
+    geom_point(size = 3) +
+    theme(axis.title.x = element_blank(),
+            axis.title.y = element_blank()) +
+    geom_hline(yintercept = 0, linetype = "dashed")
+  
+  # Add quadratic regression line for variance based on statistical significance calculated in `Linear Models.rmd`
+  if (stat_value == "Var") {
+    p <- p + geom_smooth(method = "lm", formula = y ~ x + I(x^2), se = FALSE, colour = "red")
+  }
+  
+  # Add linear regression line for start based on statistical significance calculated in `Linear Models.rmd`
+  if (stat_value == "Start") {
+    p <- p + geom_smooth(method = "lm", formula = y ~ x, se = FALSE, colour = "red")
+  }
+  
+  # Export 
+  pdf(file.path("./Figures/LatitudinalClines", paste(stat_value, "_Emergent.pdf", sep = "")), width = 10, height = 6)
+  print(p)
+  dev.off()
+}
+```
